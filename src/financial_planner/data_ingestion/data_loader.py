@@ -14,6 +14,11 @@ from typing import Final, IO
 
 import pandas as pd
 
+from src.financial_planner.data_ingestion.validation import (
+    PlanningValidationError,
+    run_advanced_validation,
+)
+
 
 PLANNING_VOLUME_COLUMNS: Final[list[str]] = [
     "Material",
@@ -136,14 +141,13 @@ def load_volume_csv(source: Path | IO[str] | IO[bytes] = DEFAULT_RAW_VOLUME_FILE
     """
 
     volume_data = pd.read_csv(source, dtype=str)
-    missing_columns = [
-        column for column in PLANNING_VOLUME_COLUMNS if column not in volume_data.columns
-    ]
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {missing_columns}")
+    
+    # Run the advanced validation suite on the raw string dataframe
+    report = run_advanced_validation(volume_data)
+    if not report.is_valid:
+        raise PlanningValidationError(report)
 
     volume_data = volume_data[PLANNING_VOLUME_COLUMNS].copy()
-    validate_required_values(volume_data)
     volume_data["Date"] = volume_data["Date"].apply(lambda value: pd.Period(value, freq="M"))
     volume_data["Volume"] = volume_data["Volume"].apply(Decimal)
     validate_volume_dataset(volume_data)

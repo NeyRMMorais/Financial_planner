@@ -13,6 +13,11 @@ from src.financial_planner.data_ingestion.data_loader import (
     PLANNING_VOLUME_COLUMNS,
     load_planning_volume_data,
 )
+from src.financial_planner.data_ingestion.validation import (
+    PlanningValidationError,
+    ValidationReport,
+    validate_grain_uniqueness,
+)
 
 
 st.set_page_config(
@@ -100,10 +105,82 @@ def render_monthly_volume(volume_data: pd.DataFrame) -> None:
     )
 
 
+def render_checklist(report: ValidationReport) -> None:
+    """Render a visual checklist of data quality checks with status emojis."""
+
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("Value is missing or blank" in i.message for i in issues) else "failed"
+    dates_status = "passed" if not any(i.column == "Date" for i in issues) else "failed"
+    volumes_status = "passed" if not any(i.column == "Volume" for i in issues) else "failed"
+
+    grain_issues = [i for i in issues if "Duplicate grain combination" in i.message]
+    grain_status = "passed" if not grain_issues else "warning"
+
+    st.markdown("### 🔍 Data Quality Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        if status == "warning":
+            return "🟡 **WARNING**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing, null, or blank planning entries.
+        - {status_emoji(dates_status)} **Period & Date Validation**: Ensures date cells are in `YYYY-MM` format and within the 2026 horizon.
+        - {status_emoji(volumes_status)} **Volume Format & Sign Check**: Ensures volumes are valid positive numeric quantities.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Checks for duplicate planning combination lines (Material, Customer, Ship-to, Date).
+        """
+    )
+
+
+def render_troubleshooting_table(report: ValidationReport) -> None:
+    """Render a troubleshooting data table detailing errors and warnings."""
+
+    issues = report.issues
+    if not issues:
+        return
+
+    st.markdown("### 🛠️ Ingestion Troubleshooting Panel")
+
+    issue_records = []
+    for issue in issues:
+        severity_badge = "🚨 Error" if issue.severity == "error" else "⚠️ Warning"
+        issue_records.append(
+            {
+                "Severity": severity_badge,
+                "Row": "Dataset-wide" if issue.row_index is None else f"Row {issue.row_index}",
+                "Column": issue.column,
+                "Invalid Value": str(issue.value) if issue.value is not None else "N/A",
+                "Message": issue.message,
+            }
+        )
+
+    st.dataframe(
+        pd.DataFrame(issue_records),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def render_volume_data(volume_data: pd.DataFrame) -> None:
     """Render the core planning file validation summary and preview."""
 
-    st.success("Volume input validated")
+    # Check for grain warnings
+    grain_issues = validate_grain_uniqueness(volume_data)
+    report = ValidationReport(is_valid=True, issues=grain_issues)
+
+    st.success("Volume input validated successfully!")
+    render_checklist(report)
+
+    if report.issues:
+        render_troubleshooting_table(report)
+
+    st.subheader("Ingestion Profile Metrics")
     render_ingestion_summary(volume_data)
 
     st.subheader("Monthly Volume")
@@ -131,6 +208,7 @@ def main() -> None:
     )
 
     volume_data = None
+    validation_error_report = None
 
     if method == "Load from Server Path":
         st.markdown(
@@ -146,6 +224,8 @@ def main() -> None:
                     st.error(f"File not found: {file_path}")
                 else:
                     volume_data = load_planning_volume_data(file_path)
+            except PlanningValidationError as error:
+                validation_error_report = error.report
             except Exception as error:
                 st.error(str(error))
     else:
@@ -158,11 +238,17 @@ def main() -> None:
         if uploaded_file is not None:
             try:
                 volume_data = load_planning_volume_data(uploaded_file)
+            except PlanningValidationError as error:
+                validation_error_report = error.report
             except Exception as error:
                 st.error(str(error))
 
     if volume_data is not None:
         render_volume_data(volume_data)
+    elif validation_error_report is not None:
+        st.error("Volume input validation failed with critical errors.")
+        render_checklist(validation_error_report)
+        render_troubleshooting_table(validation_error_report)
     else:
         st.info("Waiting for volume input data...")
 
