@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_volume_input.csv"
 PRICE_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_price_input.csv"
 COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_cost_input.csv"
+VAR_COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_variable_cost_input.csv"
 ROW_COUNT = 3_000
 TARGET_VOLUME_TONS = Decimal("77000.000")
 
@@ -238,10 +239,53 @@ def write_raw_cost_test_file() -> Path:
     return COST_OUTPUT_PATH
 
 
+def get_base_variable_cost(material_id: str) -> Decimal:
+    """Compute a deterministic mock unit variable cost per ton."""
+    base_map = {
+        "MAT-1001": Decimal("35.00"),
+        "MAT-2004": Decimal("42.50"),
+        "MAT-3098": Decimal("22.00"),
+        "MAT-4120": Decimal("65.25"),
+        "MAT-5185": Decimal("15.00"),
+    }
+    return base_map.get(material_id, Decimal("20.00"))
+
+
+def generate_variable_cost_rows() -> list[dict[str, str]]:
+    """Build deterministic raw variable cost records for the planning year combinations."""
+    rows = []
+    # Generate an annual variable cost for each Material
+    for material, material_id in MATERIALS:
+        cost = get_base_variable_cost(material_id)
+        rows.append(
+            {
+                "Material": material,
+                "Material ID": material_id,
+                "Variable Cost": f"{cost:.2f}",
+            }
+        )
+    return rows
+
+
+def write_raw_variable_cost_test_file() -> Path:
+    """Write the raw variable cost CSV file used as input source."""
+    VAR_COST_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rows = generate_variable_cost_rows()
+
+    with VAR_COST_OUTPUT_PATH.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return VAR_COST_OUTPUT_PATH
+
+
 if __name__ == "__main__":
     vol_path = write_raw_volume_test_file()
     price_path = write_raw_price_test_file()
     cost_path = write_raw_cost_test_file()
+    var_cost_path = write_raw_variable_cost_test_file()
     print(f"Generated volume file: {vol_path}")
     print(f"Generated price file: {price_path}")
     print(f"Generated cost file: {cost_path}")
+    print(f"Generated variable cost file: {var_cost_path}")

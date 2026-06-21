@@ -37,6 +37,12 @@ PLANNING_COST_COLUMNS: list[str] = [
     "Cost",
 ]
 
+PLANNING_VARIABLE_COST_COLUMNS: list[str] = [
+    "Material",
+    "Material ID",
+    "Variable Cost",
+]
+
 
 @dataclass
 class ValidationIssue:
@@ -795,6 +801,182 @@ def validate_cost_completeness(
                     row_index=None,
                     value=f"Plant: {plant}, Material: {mat_id}, Period: {date_val}",
                     message="Missing raw material cost for combination and period",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def validate_variable_cost_schema(df: Any) -> list[ValidationIssue]:
+    """Verify that all required variable cost columns are present."""
+    issues = []
+    missing_columns = [
+        column for column in PLANNING_VARIABLE_COST_COLUMNS if column not in df.columns
+    ]
+    for column in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=column,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{column}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_variable_cost_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    """Verify that no required variable cost fields are null or blank."""
+    issues = []
+    check_columns = [
+        column for column in PLANNING_VARIABLE_COST_COLUMNS if column in df.columns
+    ]
+
+    for column in check_columns:
+        null_mask = df[column].isna()
+        str_series = df[column].fillna("").astype(str).str.strip()
+        empty_mask = str_series.eq("")
+
+        combined_mask = null_mask | empty_mask
+        if combined_mask.any():
+            for idx in df[combined_mask].index:
+                val = df.at[idx, column]
+                issues.append(
+                    ValidationIssue(
+                        column=column,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Value is missing or blank",
+                        severity="error",
+                    )
+                )
+
+    return issues
+
+
+def validate_variable_cost_values(df: Any) -> list[ValidationIssue]:
+    """Verify that variable cost values parse to non-negative Decimal values."""
+    issues = []
+    if "Variable Cost" not in df.columns:
+        return issues
+
+    for idx, val in df["Variable Cost"].items():
+        if pd_is_null_like(val):
+            continue
+
+        if isinstance(val, Decimal):
+            if val < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Variable Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Variable Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+            continue
+
+        val_str = str(val).strip()
+        if val_str == "":
+            continue
+
+        try:
+            decimal_value = Decimal(val_str)
+            if decimal_value < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Variable Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Variable Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+        except Exception:
+            issues.append(
+                ValidationIssue(
+                    column="Variable Cost",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Variable Cost must be a valid numeric value",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_variable_cost_grain_uniqueness(df: Any) -> list[ValidationIssue]:
+    """Verify that there is exactly one variable cost record per Material ID."""
+    issues = []
+    required_grain = ["Material ID"]
+
+    for column in required_grain:
+        if column not in df.columns:
+            return issues
+
+    temp_df = df[required_grain].copy()
+    for col in required_grain:
+        temp_df[col] = temp_df[col].astype(str).str.strip()
+
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for mat_id, group in grouped:
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Material ID",
+                    row_index=None,
+                    value=f"Material: {mat_id}",
+                    message=f"Duplicate variable cost found for Material across rows {row_indices}",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def run_variable_cost_validation(df: Any) -> ValidationReport:
+    """Run all validation rules on the raw string annual variable cost dataset."""
+    issues = []
+
+    schema_issues = validate_variable_cost_schema(df)
+    issues.extend(schema_issues)
+
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+
+    issues.extend(validate_variable_cost_nulls_and_empty(df))
+    issues.extend(validate_variable_cost_values(df))
+    issues.extend(validate_variable_cost_grain_uniqueness(df))
+
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_variable_cost_completeness(
+    volume_df: Any, var_cost_df: Any
+) -> list[ValidationIssue]:
+    """Verify that every Material ID in the volume dataset has a matching variable cost."""
+    issues = []
+    if "Material ID" not in volume_df.columns or "Material ID" not in var_cost_df.columns:
+        return issues
+
+    var_cost_keys = set(var_cost_df["Material ID"].astype(str).str.strip())
+
+    for _, row in volume_df.iterrows():
+        mat_id = str(row["Material ID"]).strip()
+
+        if mat_id not in var_cost_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Variable Cost",
+                    row_index=None,
+                    value=f"Material ID: {mat_id}",
+                    message="Missing variable cost for Material",
                     severity="error",
                 )
             )

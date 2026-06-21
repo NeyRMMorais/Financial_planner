@@ -80,3 +80,62 @@ def calculate_rm_costs(
     merged["Total RM Cost"] = merged["Volume"] * merged["Cost"]
 
     return merged
+
+
+def calculate_variable_costs(
+    volume_df: pd.DataFrame,
+    var_cost_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Calculate annual variable production costs for all planning combinations.
+
+    Formula:
+        Total Variable Cost = Volume * Variable Cost
+
+    Args:
+        volume_df: DataFrame with columns including:
+            ['Material ID', 'Volume']
+        var_cost_df: DataFrame with columns including:
+            ['Material ID', 'Variable Cost']
+
+    Returns:
+        A DataFrame containing all columns from volume_df plus:
+            - 'Variable Cost': The resolved unit variable cost.
+            - 'Total Variable Cost': The calculated total variable cost as a Decimal.
+
+    Raises:
+        ValueError: If variable cost configurations are missing for active combinations.
+    """
+
+    if volume_df.empty:
+        result = volume_df.copy()
+        result["Variable Cost"] = pd.Series(dtype=object)
+        result["Total Variable Cost"] = pd.Series(dtype=object)
+        return result
+
+    vol_clean = volume_df.copy()
+    vol_clean["Material ID"] = vol_clean["Material ID"].astype(str).str.strip()
+
+    cost_clean = var_cost_df.copy()
+    cost_clean["Material ID"] = cost_clean["Material ID"].astype(str).str.strip()
+
+    merged = pd.merge(
+        vol_clean,
+        cost_clean[["Material ID", "Variable Cost"]],
+        on=["Material ID"],
+        how="left",
+    )
+
+    missing_costs = merged["Variable Cost"].isna()
+    if missing_costs.any():
+        gaps = (
+            merged[missing_costs][["Material ID"]]
+            .drop_duplicates()
+            .to_dict("records")
+        )
+        raise ValueError(
+            f"Missing variable costs for materials: {gaps}"
+        )
+
+    merged["Total Variable Cost"] = merged["Volume"] * merged["Variable Cost"]
+
+    return merged

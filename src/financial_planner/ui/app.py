@@ -28,6 +28,10 @@ from src.financial_planner.data_ingestion.cost_loader import (
     DEFAULT_RAW_COST_FILE,
     load_cost_data,
 )
+from src.financial_planner.data_ingestion.variable_cost_loader import (
+    DEFAULT_RAW_VAR_COST_FILE,
+    load_variable_cost_data,
+)
 from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     ValidationReport,
@@ -35,13 +39,15 @@ from src.financial_planner.data_ingestion.validation import (
     validate_pricing_completeness,
     validate_cost_completeness,
     run_cost_validation,
+    validate_variable_cost_completeness,
+    run_variable_cost_validation,
 )
 from src.financial_planner.calculations.pricing import (
     PriceOverride,
     resolve_monthly_prices,
 )
 from src.financial_planner.calculations.revenue import calculate_revenue
-from src.financial_planner.calculations.costs import calculate_rm_costs
+from src.financial_planner.calculations.costs import calculate_rm_costs, calculate_variable_costs
 
 
 st.set_page_config(
@@ -449,6 +455,53 @@ def render_cost_data(base_costs: pd.DataFrame) -> None:
     )
 
 
+def render_var_cost_checklist(report: ValidationReport) -> None:
+    """Render a visual checklist of variable cost data quality checks with status emojis."""
+
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("Value is missing or blank" in i.message for i in issues) else "failed"
+    values_status = "passed" if not any(i.column == "Variable Cost" for i in issues) else "failed"
+    grain_status = "passed" if not any("Duplicate variable cost" in i.message for i in issues) else "failed"
+
+    st.markdown("### 🔍 Variable Cost Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing or blank cost entries.
+        - {status_emoji(values_status)} **Cost Format & Sign Check**: Ensures variable costs are valid non-negative quantities.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Ensures exactly one cost record exists per Material ID.
+        """
+    )
+
+
+def render_var_cost_data(base_var_costs: pd.DataFrame) -> None:
+    """Render the variable cost overview and raw dataset preview."""
+
+    st.success("Annual variable cost data validated successfully!")
+
+    report = ValidationReport(is_valid=True, issues=[])
+    render_var_cost_checklist(report)
+
+    st.write("### Base Annual Variable Costs Preview (Top 100 rows)")
+    display_costs = base_var_costs.copy()
+    display_costs["Variable Cost"] = display_costs["Variable Cost"].map(format_currency)
+
+    st.dataframe(
+        display_costs.head(100),
+        use_container_width=True,
+        hide_index=True,
+        column_order=["Material", "Material ID", "Variable Cost"],
+    )
+
+
 def main() -> None:
     """Run the Streamlit app for the first planning workflow step."""
 
@@ -461,6 +514,8 @@ def main() -> None:
         st.session_state.price_overrides = []
     if "base_costs" not in st.session_state:
         st.session_state.base_costs = None
+    if "base_var_costs" not in st.session_state:
+        st.session_state.base_var_costs = None
 
     st.title("Financial Planner - Ingestion & Adjustments")
 
@@ -504,10 +559,31 @@ def main() -> None:
         else:
             st.success("🟢 Cost Ingestion Reconciled: All planned sales records have monthly RM costs configured.")
 
-    tab_volume, tab_price, tab_cost, tab_revenue = st.tabs([
+    # Cross-Table Ingestion Completeness Check (Variable Cost)
+    has_var_cost_issues = False
+    if st.session_state.volume_data is not None and st.session_state.base_var_costs is not None:
+        var_cost_issues = validate_variable_cost_completeness(
+            st.session_state.volume_data, st.session_state.base_var_costs
+        )
+        if var_cost_issues:
+            has_var_cost_issues = True
+            st.error("🚨 Missing Variable Costs: Active planned volume records lack annual variable costs.")
+            missing_var_cost_records = [
+                {
+                    "Active Planned combination": issue.value,
+                    "Reconciliation Error": issue.message,
+                }
+                for issue in var_cost_issues
+            ]
+            st.dataframe(pd.DataFrame(missing_var_cost_records), use_container_width=True, hide_index=True)
+        else:
+            st.success("🟢 Variable Cost Ingestion Reconciled: All planned sales records have annual variable costs configured.")
+
+    tab_volume, tab_price, tab_cost, tab_var_cost, tab_revenue = st.tabs([
         "📊 Volume Ingestion",
         "💵 Price Planning",
-        "🏭 Cost Ingestion",
+        "🏭 RM Cost Ingestion",
+        "🏭 Variable Cost Ingestion",
         "💰 Revenue & Cost Planning"
     ])
 
@@ -676,15 +752,70 @@ def main() -> None:
         else:
             st.info("Waiting for monthly raw material cost data...")
 
+    with tab_var_cost:
+        st.subheader("Annual Variable Production Cost Ingestion")
+        vc_method = st.radio(
+            "Choose how to load your planning annual variable costs file:",
+            options=["Load from Server Path", "Upload CSV File"],
+            key="var_cost_method",
+            horizontal=True,
+        )
+
+        vc_validation_error = None
+
+        if vc_method == "Load from Server Path":
+            st.markdown(
+                "Use this option to load annual variable costs directly from the server's filesystem, "
+                "avoiding WebSocket transfer issues in sandboxed or forwarded environments."
+            )
+            from pathlib import Path
+            vc_file_path_str = st.text_input("Server Variable Cost File Path", value=str(DEFAULT_RAW_VAR_COST_FILE), key="var_cost_path")
+            if st.button("Load Variable Cost Data", key="var_cost_load_btn"):
+                try:
+                    vc_file_path = Path(vc_file_path_str)
+                    if not vc_file_path.exists():
+                        st.error(f"File not found: {vc_file_path}")
+                    else:
+                        st.session_state.base_var_costs = load_variable_cost_data(vc_file_path)
+                except PlanningValidationError as error:
+                    vc_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
+        else:
+            vc_uploaded_file = st.file_uploader(
+                "Upload annual variable costs input",
+                type=["csv"],
+                accept_multiple_files=False,
+                key="var_cost_uploader",
+            )
+
+            if vc_uploaded_file is not None:
+                try:
+                    st.session_state.base_var_costs = load_variable_cost_data(vc_uploaded_file)
+                except PlanningValidationError as error:
+                    vc_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
+
+        if st.session_state.base_var_costs is not None:
+            render_var_cost_data(st.session_state.base_var_costs)
+        elif vc_validation_error is not None:
+            st.error("Variable Cost validation failed with critical errors.")
+            render_var_cost_checklist(vc_validation_error)
+            render_troubleshooting_table(vc_validation_error)
+        else:
+            st.info("Waiting for annual variable cost data...")
+
     with tab_revenue:
-        st.subheader("Planning Revenue & Raw Material Cost Calculations")
+        st.subheader("Planning Revenue & Cost Calculations")
         if (
             st.session_state.volume_data is None
             or st.session_state.base_prices is None
             or st.session_state.base_costs is None
+            or st.session_state.base_var_costs is None
         ):
             st.info(
-                "Waiting for sales volume, base pricing, and monthly raw material cost data to be loaded..."
+                "Waiting for sales volume, base pricing, RM costs, and variable costs data to be loaded..."
             )
         else:
             price_issues = validate_pricing_completeness(
@@ -693,8 +824,11 @@ def main() -> None:
             cost_issues = validate_cost_completeness(
                 st.session_state.volume_data, st.session_state.base_costs
             )
+            var_cost_issues = validate_variable_cost_completeness(
+                st.session_state.volume_data, st.session_state.base_var_costs
+            )
 
-            if price_issues or cost_issues:
+            if price_issues or cost_issues or var_cost_issues:
                 if price_issues:
                     st.warning(
                         "🚨 Cannot calculate planning revenue: There are missing unit prices. "
@@ -703,7 +837,12 @@ def main() -> None:
                 if cost_issues:
                     st.warning(
                         "🚨 Cannot calculate planning costs: There are missing monthly RM costs. "
-                        "Please resolve the cost gaps in the 'Cost Ingestion' tab before proceeding."
+                        "Please resolve the cost gaps in the 'RM Cost Ingestion' tab before proceeding."
+                    )
+                if var_cost_issues:
+                    st.warning(
+                        "🚨 Cannot calculate planning costs: There are missing variable costs. "
+                        "Please resolve the cost gaps in the 'Variable Cost Ingestion' tab before proceeding."
                     )
             else:
                 # 1. Resolve final monthly prices (with overrides applied)
@@ -718,14 +857,19 @@ def main() -> None:
                         st.session_state.volume_data, resolved_prices
                     )
                     # Calculate raw material costs
-                    calculated_df = calculate_rm_costs(
+                    rm_calc_df = calculate_rm_costs(
                         revenue_df, st.session_state.base_costs
+                    )
+                    # Calculate variable costs
+                    calculated_df = calculate_variable_costs(
+                        rm_calc_df, st.session_state.base_var_costs
                     )
 
                     # 3. Calculate summary metrics using Decimal math
                     total_volume = sum(calculated_df["Volume"], Decimal("0.000"))
                     total_revenue = sum(calculated_df["Revenue"], Decimal("0.00"))
-                    total_cost = sum(calculated_df["Total RM Cost"], Decimal("0.00"))
+                    total_rm_cost = sum(calculated_df["Total RM Cost"], Decimal("0.00"))
+                    total_var_cost = sum(calculated_df["Total Variable Cost"], Decimal("0.00"))
 
                     # Safeguards against division by zero
                     weighted_avg_price = (
@@ -733,24 +877,30 @@ def main() -> None:
                         if total_volume > 0
                         else Decimal("0.00")
                     )
-                    weighted_avg_cost = (
-                        total_cost / total_volume
+                    weighted_avg_rm_cost = (
+                        total_rm_cost / total_volume
+                        if total_volume > 0
+                        else Decimal("0.00")
+                    )
+                    weighted_avg_var_cost = (
+                        total_var_cost / total_volume
                         if total_volume > 0
                         else Decimal("0.00")
                     )
 
                     # 4. Render summary metrics cards
-                    cols = st.columns(5)
-                    cols[0].metric("Total Volume (Tons)", format_decimal(total_volume))
+                    cols = st.columns(6)
+                    cols[0].metric("Total Volume (T)", format_decimal(total_volume))
                     cols[1].metric("Total Revenue ($)", format_currency(total_revenue))
-                    cols[2].metric("Total RM Cost ($)", format_currency(total_cost))
-                    cols[3].metric("Weighted Avg Price ($/Ton)", format_currency(weighted_avg_price))
-                    cols[4].metric("Weighted Avg RM Cost ($/Ton)", format_currency(weighted_avg_cost))
+                    cols[2].metric("Total RM Cost ($)", format_currency(total_rm_cost))
+                    cols[3].metric("Total Var Cost ($)", format_currency(total_var_cost))
+                    cols[4].metric("Avg RM Cost ($/T)", format_currency(weighted_avg_rm_cost))
+                    cols[5].metric("Avg Var Cost ($/T)", format_currency(weighted_avg_var_cost))
 
                     st.markdown("---")
 
                     # 5. Display preview of the calculated dataset
-                    st.write("### Calculated Revenue & RM Cost Dataset Preview (Top 100 rows)")
+                    st.write("### Calculated Planning Dataset Preview (Top 100 rows)")
 
                     display_df = calculated_df.copy()
                     display_df["Date"] = display_df["Date"].astype(str)
@@ -759,6 +909,8 @@ def main() -> None:
                     display_df["Revenue"] = display_df["Revenue"].map(format_currency)
                     display_df["Cost"] = display_df["Cost"].map(format_currency)
                     display_df["Total RM Cost"] = display_df["Total RM Cost"].map(format_currency)
+                    display_df["Variable Cost"] = display_df["Variable Cost"].map(format_currency)
+                    display_df["Total Variable Cost"] = display_df["Total Variable Cost"].map(format_currency)
 
                     st.dataframe(
                         display_df.head(100),
@@ -774,6 +926,8 @@ def main() -> None:
                             "Revenue",
                             "Cost",
                             "Total RM Cost",
+                            "Variable Cost",
+                            "Total Variable Cost",
                         ],
                     )
 
