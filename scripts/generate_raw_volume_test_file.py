@@ -10,6 +10,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_volume_input.csv"
+PRICE_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_price_input.csv"
 ROW_COUNT = 3_000
 TARGET_VOLUME_TONS = Decimal("77000.000")
 
@@ -134,6 +135,58 @@ def write_raw_volume_test_file() -> Path:
     return OUTPUT_PATH
 
 
+def get_base_price(material_id: str, sold_to_id: str, ship_to_id: str) -> Decimal:
+    """Compute a deterministic mock unit price per ton."""
+
+    base_map = {
+        "MAT-1001": Decimal("250.00"),
+        "MAT-2004": Decimal("315.50"),
+        "MAT-3098": Decimal("185.00"),
+        "MAT-4120": Decimal("420.25"),
+        "MAT-5185": Decimal("95.00"),
+    }
+    base = base_map.get(material_id, Decimal("100.00"))
+    cust_num = int(sold_to_id.split("-")[1])
+    ship_num = sum(ord(c) for c in ship_to_id) % 5
+    return base + Decimal(f"{cust_num * 3.50 + ship_num * 1.25:.2f}")
+
+
+def generate_price_rows() -> list[dict[str, str]]:
+    """Build deterministic raw price records for the planning year combinations."""
+
+    rows = []
+    # Generate one price for every unique combination of material, customer, and ship-to
+    for _, material_id in MATERIALS:
+        for sold_to_id, _ in CUSTOMERS:
+            for ship_to_id, _ in SHIP_TO_BY_CUSTOMER[sold_to_id]:
+                price = get_base_price(material_id, sold_to_id, ship_to_id)
+                rows.append(
+                    {
+                        "Sold to ID": sold_to_id,
+                        "Ship to ID": ship_to_id,
+                        "Material ID": material_id,
+                        "Price": f"{price:.2f}",
+                    }
+                )
+    return rows
+
+
+def write_raw_price_test_file() -> Path:
+    """Write the raw pricing CSV file used as input source."""
+
+    PRICE_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rows = generate_price_rows()
+
+    with PRICE_OUTPUT_PATH.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return PRICE_OUTPUT_PATH
+
+
 if __name__ == "__main__":
-    output_path = write_raw_volume_test_file()
-    print(output_path)
+    vol_path = write_raw_volume_test_file()
+    price_path = write_raw_price_test_file()
+    print(f"Generated volume file: {vol_path}")
+    print(f"Generated price file: {price_path}")

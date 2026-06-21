@@ -22,6 +22,13 @@ PLANNING_VOLUME_COLUMNS: list[str] = [
     "Volume",
 ]
 
+PLANNING_PRICE_COLUMNS: list[str] = [
+    "Sold to ID",
+    "Ship to ID",
+    "Material ID",
+    "Price",
+]
+
 
 @dataclass
 class ValidationIssue:
@@ -303,5 +310,170 @@ def run_advanced_validation(df: Any) -> ValidationReport:
     issues.extend(validate_grain_uniqueness(df))
 
     # Valid if there are no errors (warnings are non-blocking)
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_price_schema(df: Any) -> list[ValidationIssue]:
+    """Verify that all required pricing columns are present in the dataset."""
+
+    issues = []
+    missing_columns = [
+        column for column in PLANNING_PRICE_COLUMNS if column not in df.columns
+    ]
+    for column in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=column,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{column}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_price_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    """Verify that no required pricing fields are null, blank, or whitespace-only."""
+
+    issues = []
+    check_columns = [
+        column for column in PLANNING_PRICE_COLUMNS if column in df.columns
+    ]
+
+    for column in check_columns:
+        null_mask = df[column].isna()
+        str_series = df[column].fillna("").astype(str).str.strip()
+        empty_mask = str_series.eq("")
+
+        combined_mask = null_mask | empty_mask
+        if combined_mask.any():
+            for idx in df[combined_mask].index:
+                val = df.at[idx, column]
+                issues.append(
+                    ValidationIssue(
+                        column=column,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Value is missing or blank",
+                        severity="error",
+                    )
+                )
+
+    return issues
+
+
+def validate_price_values(df: Any) -> list[ValidationIssue]:
+    """Verify that price values parse to non-negative Decimal values."""
+
+    issues = []
+    if "Price" not in df.columns:
+        return issues
+
+    for idx, val in df["Price"].items():
+        if pd_is_null_like(val):
+            continue
+
+        if isinstance(val, Decimal):
+            if val < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Price",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Price cannot be negative",
+                        severity="error",
+                    )
+                )
+            continue
+
+        val_str = str(val).strip()
+        if val_str == "":
+            continue
+
+        try:
+            decimal_value = Decimal(val_str)
+            if decimal_value < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Price",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Price cannot be negative",
+                        severity="error",
+                    )
+                )
+        except Exception:
+            issues.append(
+                ValidationIssue(
+                    column="Price",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Price must be a valid numeric value",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def validate_price_grain_uniqueness(df: Any) -> list[ValidationIssue]:
+    """Verify that there is exactly one price record per unique planning combination.
+
+    Duplicate price rows are treated as errors because they create ambiguity for calculations.
+    """
+
+    issues = []
+    required_grain = ["Sold to ID", "Ship to ID", "Material ID"]
+
+    for column in required_grain:
+        if column not in df.columns:
+            return issues
+
+    temp_df = df[required_grain].copy()
+    for col in required_grain:
+        temp_df[col] = temp_df[col].astype(str).str.strip()
+
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for keys, group in grouped:
+            if isinstance(keys, tuple):
+                cust_id, ship_id, mat_id = keys
+            else:
+                cust_id = keys
+                ship_id, mat_id = "", ""
+
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Sold to ID, Ship to ID, Material ID",
+                    row_index=None,
+                    value=f"Customer: {cust_id}, Ship-to: {ship_id}, Material: {mat_id}",
+                    message=f"Duplicate pricing grain combination found across rows {row_indices}",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def run_pricing_validation(df: Any) -> ValidationReport:
+    """Run all validation rules on the raw string pricing dataset."""
+
+    issues = []
+
+    schema_issues = validate_price_schema(df)
+    issues.extend(schema_issues)
+
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+
+    issues.extend(validate_price_nulls_and_empty(df))
+    issues.extend(validate_price_values(df))
+    issues.extend(validate_price_grain_uniqueness(df))
+
     has_errors = any(issue.severity == "error" for issue in issues)
     return ValidationReport(is_valid=not has_errors, issues=issues)
