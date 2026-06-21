@@ -12,6 +12,7 @@ from src.financial_planner.data_ingestion.validation import (
     validate_dates_format_and_range,
     validate_grain_uniqueness,
     validate_nulls_and_empty,
+    validate_pricing_completeness,
     validate_schema,
     validate_volumes_format_and_sign,
 )
@@ -246,3 +247,47 @@ def test_run_advanced_validation_full_suite(valid_record_df: pd.DataFrame) -> No
     assert report.is_valid is False
     assert len(report.issues) == 1
     assert report.issues[0].severity == "error"
+
+
+def test_validate_pricing_completeness_success(valid_record_df: pd.DataFrame) -> None:
+    """If all volume combinations have prices, completeness check has no issues."""
+
+    price_df = pd.DataFrame(
+        [
+            {
+                "Sold to ID": "CUST-001",
+                "Ship to ID": "SHIP-001-NL",
+                "Material ID": "MAT-1001",
+                "Price": "250.00",
+            }
+        ]
+    )
+
+    issues = validate_pricing_completeness(valid_record_df, price_df)
+    assert len(issues) == 0
+
+
+def test_validate_pricing_completeness_missing(valid_record_df: pd.DataFrame) -> None:
+    """If a volume combination has no matching price, it is flagged as a critical error."""
+
+    # Volume has CUST-001/SHIP-001-NL/MAT-1001
+    # Price has CUST-002/...
+    price_df = pd.DataFrame(
+        [
+            {
+                "Sold to ID": "CUST-002",
+                "Ship to ID": "SHIP-002-DE",
+                "Material ID": "MAT-2004",
+                "Price": "350.00",
+            }
+        ]
+    )
+
+    issues = validate_pricing_completeness(valid_record_df, price_df)
+
+    assert len(issues) == 1
+    assert issues[0].column == "Price"
+    assert issues[0].severity == "error"
+    assert "Missing unit price" in issues[0].message
+    assert "CUST-001" in issues[0].value
+

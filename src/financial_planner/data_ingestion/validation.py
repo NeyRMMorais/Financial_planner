@@ -477,3 +477,52 @@ def run_pricing_validation(df: Any) -> ValidationReport:
 
     has_errors = any(issue.severity == "error" for issue in issues)
     return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_pricing_completeness(
+    volume_df: Any, price_df: Any
+) -> list[ValidationIssue]:
+    """Verify that every combination in the sales volume dataset has a matching price.
+
+    Missing price combinations are treated as errors because they prevent
+    revenue and margin calculations.
+    """
+
+    issues = []
+    grain_cols = ["Sold to ID", "Ship to ID", "Material ID"]
+
+    # Ensure required columns are present in both dataframes
+    for col in grain_cols:
+        if col not in volume_df.columns or col not in price_df.columns:
+            return issues
+
+    # Extract unique combinations from the volume dataset
+    vol_grain = volume_df[grain_cols].drop_duplicates()
+
+    # Create a set of unique combinations in the pricing dataset for O(1) lookup
+    price_keys = set(
+        zip(
+            price_df["Sold to ID"].astype(str).str.strip(),
+            price_df["Ship to ID"].astype(str).str.strip(),
+            price_df["Material ID"].astype(str).str.strip(),
+        )
+    )
+
+    # Check for missing prices
+    for _, row in vol_grain.iterrows():
+        cust_id = str(row["Sold to ID"]).strip()
+        ship_id = str(row["Ship to ID"]).strip()
+        mat_id = str(row["Material ID"]).strip()
+
+        if (cust_id, ship_id, mat_id) not in price_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Price",
+                    row_index=None,
+                    value=f"Customer: {cust_id}, Ship-to: {ship_id}, Material: {mat_id}",
+                    message="Missing unit price in base pricing table",
+                    severity="error",
+                )
+            )
+
+    return issues

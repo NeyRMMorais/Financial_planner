@@ -21,6 +21,7 @@ from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     ValidationReport,
     validate_grain_uniqueness,
+    validate_pricing_completeness,
 )
 from src.financial_planner.calculations.pricing import (
     PriceOverride,
@@ -389,6 +390,25 @@ def main() -> None:
         st.session_state.price_overrides = []
 
     st.title("Financial Planner - Ingestion & Adjustments")
+
+    # Cross-Table Ingestion Completeness Check
+    if st.session_state.volume_data is not None and st.session_state.base_prices is not None:
+        completeness_issues = validate_pricing_completeness(
+            st.session_state.volume_data, st.session_state.base_prices
+        )
+        if completeness_issues:
+            st.error("🚨 Missing Unit Prices: Active planned sales combinations lack base prices.")
+            missing_records = []
+            for issue in completeness_issues:
+                missing_records.append(
+                    {
+                        "Active Planned Combination": issue.value,
+                        "Reconciliation Error": issue.message,
+                    }
+                )
+            st.dataframe(pd.DataFrame(missing_records), use_container_width=True, hide_index=True)
+        else:
+            st.success("🟢 Ingestion Reconciled: All planned sales combinations have base prices configured.")
 
     tab_volume, tab_price = st.tabs(["📊 Volume Ingestion", "💵 Price Planning"])
 
