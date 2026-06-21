@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+
+# Force reload of local project modules on Streamlit rerun to avoid stale imports/errors
+for _mod in list(sys.modules.keys()):
+    if _mod.startswith("src.financial_planner"):
+        del sys.modules[_mod]
+
 from decimal import Decimal
 from io import BytesIO
 
@@ -27,6 +34,7 @@ from src.financial_planner.calculations.pricing import (
     PriceOverride,
     resolve_monthly_prices,
 )
+from src.financial_planner.calculations.revenue import calculate_revenue
 
 
 st.set_page_config(
@@ -52,6 +60,12 @@ def format_decimal(value: Decimal) -> str:
     """Format a Decimal value as a business-readable tons string."""
 
     return f"{value:,.3f}"
+
+
+def format_currency(value: Decimal) -> str:
+    """Format a Decimal value as a business-readable currency string."""
+
+    return f"${value:,.2f}"
 
 
 def prepare_display_data(volume_data: pd.DataFrame) -> pd.DataFrame:
@@ -410,7 +424,7 @@ def main() -> None:
         else:
             st.success("🟢 Ingestion Reconciled: All planned sales combinations have base prices configured.")
 
-    tab_volume, tab_price = st.tabs(["📊 Volume Ingestion", "💵 Price Planning"])
+    tab_volume, tab_price, tab_revenue = st.tabs(["📊 Volume Ingestion", "💵 Price Planning", "💰 Revenue Planning"])
 
     with tab_volume:
         st.subheader("Monthly Sales Volume Ingestion")
@@ -522,6 +536,84 @@ def main() -> None:
             render_troubleshooting_table(p_validation_error)
         else:
             st.info("Waiting for base pricing data...")
+
+    with tab_revenue:
+        st.subheader("Planning Revenue Calculations")
+        if st.session_state.volume_data is None or st.session_state.base_prices is None:
+            st.info("Waiting for both sales volume and base pricing data to be loaded...")
+        else:
+            completeness_issues = validate_pricing_completeness(
+                st.session_state.volume_data, st.session_state.base_prices
+            )
+            if completeness_issues:
+                st.warning(
+                    "🚨 Cannot calculate planning revenue: There are missing unit prices. "
+                    "Please resolve the pricing gaps in the 'Price Planning' tab before proceeding."
+                )
+            else:
+                # 1. Resolve final monthly prices (with overrides applied)
+                resolved_prices = resolve_monthly_prices(
+                    st.session_state.base_prices, st.session_state.price_overrides
+                )
+                
+                # 2. Run revenue calculations
+                try:
+                    revenue_df = calculate_revenue(st.session_state.volume_data, resolved_prices)
+                    
+                    # 3. Calculate summary metrics using Decimal math
+                    total_volume = sum(revenue_df["Volume"], Decimal("0.000"))
+                    total_revenue = sum(revenue_df["Revenue"], Decimal("0.00"))
+                    
+                    # Safeguard against division by zero
+                    if total_volume > 0:
+                        weighted_avg_price = total_revenue / total_volume
+                    else:
+                        weighted_avg_price = Decimal("0.00")
+                        
+                    # 4. Render summary metrics cards
+                    cols = st.columns(3)
+                    cols[0].metric("Total Volume (Tons)", format_decimal(total_volume))
+                    cols[1].metric("Total Revenue ($)", format_currency(total_revenue))
+                    cols[2].metric("Weighted Avg Price ($/Ton)", format_currency(weighted_avg_price))
+                    
+                    st.markdown("---")
+                    
+                    # 5. Display preview of the calculated revenue dataset
+                    st.write("### Calculated Revenue Dataset Preview (Top 100 rows)")
+                    
+                    display_rev = revenue_df.copy()
+                    display_rev["Date"] = display_rev["Date"].astype(str)
+                    display_rev["Volume"] = display_rev["Volume"].map(format_decimal)
+                    display_rev["Price"] = display_rev["Price"].map(format_currency)
+                    display_rev["Revenue"] = display_rev["Revenue"].map(format_currency)
+                    
+                    st.dataframe(
+                        display_rev.head(100),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_order=[
+                            "Material",
+                            "Material ID",
+                            "Date",
+                            "Sold to",
+                            "Ship to",
+                            "Volume",
+                            "Price",
+                            "Revenue",
+                        ],
+                    )
+                    
+                    # 6. Export functionality
+                    csv = revenue_df.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="📥 Download Calculated Revenue (CSV)",
+                        data=csv,
+                        file_name="calculated_revenue_2026.csv",
+                        mime="text/csv",
+                        key="dl_revenue_btn",
+                    )
+                except Exception as e:
+                    st.error(f"An error occurred during revenue calculations: {e}")
 
 
 if __name__ == "__main__":

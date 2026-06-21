@@ -56,3 +56,42 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
 
 *   **Ingestion Phase (Phase 1):** Currently working on enhancing the validation layer (`validation.py`) and adding a Streamlit Login Gate.
 *   **Roadmap:** Next we will implement the Calculation Engine (Phase 2), UI simulation controls (Phase 3), and SAC export drivers (Phase 4).
+
+---
+
+## 🔄 Streamlit Development & Reload Protocol
+
+Streamlit runs as a long-running process that hot-reloads the main script (e.g., `app.py`) on changes. However, Python's standard module caching (`sys.modules`) prevents nested imports from being reloaded, leading to stale code execution and `ImportError`s during active development.
+
+To address this, we follow this protocol:
+
+### 1. Automated Module-Cache Clearing
+*   **Rule:** The main UI entrypoint (`app.py`) must dynamically delete all cached modules starting with `src.financial_planner` from `sys.modules` at the very beginning of execution.
+*   **Code:**
+    ```python
+    import sys
+    for _mod in list(sys.modules.keys()):
+        if _mod.startswith("src.financial_planner"):
+            del sys.modules[_mod]
+    ```
+    This forces a clean re-import of all helper modules (e.g., calculations, loaders, validation) whenever the browser is refreshed or a user triggers a rerun.
+
+### 2. Orphaned Port & Process Troubleshooting (Windows)
+If port `8501` is blocked or the app displays persistent stale state that browser refresh doesn't clear, run the following troubleshooting protocol in a terminal:
+
+1.  **Check for running Python processes**:
+    ```powershell
+    wmic process get description,processid | findstr /i "python"
+    ```
+2.  **Verify port 8501 status and locate owner PID**:
+    ```powershell
+    netstat -ano | findstr 8501
+    ```
+3.  **Kill the offending Python process**:
+    ```powershell
+    taskkill /F /PID <PID>
+    ```
+4.  **Launch a clean server**:
+    ```powershell
+    python -m streamlit run src/financial_planner/ui/app.py
+    ```

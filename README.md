@@ -36,16 +36,25 @@ Financial_planner/
 │   └── generate_raw_volume_test_file.py
 ├── src/
 │   └── financial_planner/
-│       ├── calculations/    # Volume, price, cost, margin, and scenario calculations
-│       ├── data_ingestion/  # Raw source loading, validation schemas, and ingestion logs
-│       │   ├── data_loader.py
-│       │   └── validation.py  # [Roadmap] Structured validation engine
-│       ├── export/          # Structured outputs formatted for SAC
-│       └── ui/              # Streamlit dashboard and UI view layers
-│           └── app.py
+      ├── calculations/    # Volume, price, cost, margin, and scenario calculations
+      │   ├── pricing.py
+      │   └── revenue.py
+      ├── data_ingestion/  # Raw source loading, validation schemas, and ingestion logs
+      │   ├── data_loader.py
+      │   ├── price_loader.py
+      │   └── validation.py
+      ├── export/          # Structured outputs formatted for SAC
+      │   └── __init__.py
+      └── ui/              # Streamlit dashboard and UI view layers
+          └── app.py
 ├── tests/                   # PyTest test suite organized by module
+│   ├── calculations/
+│   │   ├── test_pricing_calculations.py
+│   │   └── test_revenue.py
 │   └── data_ingestion/
-│       └── test_data_loader.py
+│       ├── test_data_loader.py
+│       ├── test_price_loader.py
+│       └── test_validation.py
 ├── pytest.ini               # PyTest configurations (disables cache writes)
 └── requirements.txt         # Project package dependencies
 ```
@@ -56,8 +65,8 @@ Financial_planner/
 
 | Phase | Description | Status |
 | :--- | :--- | :--- |
-| **Phase 1: Ingestion & Validation** | Validate 2026 raw volume files, check data type/nullity, and show an ingestion summary. | **In Progress** (Core Loader & UI complete; advanced checks & login pending) |
-| **Phase 2: Calculation Engine** | Implement price, variable unit cost, revenue, and gross margin formula logic. | *Planned* |
+| **Phase 1: Ingestion & Validation** | Validate 2026 sales volumes, base customer product pricing, and cross-dataset grain completeness checks. | **Completed** |
+| **Phase 2: Calculation Engine** | Implement price propagation overrides, variable unit costs, and Decimal-safe revenue calculation logic. | **In Progress** (Pricing & Revenue calculations completed; Variable Costs & Gross Margin pending) |
 | **Phase 3: Scenario & Simulations** | Add dashboard sliders to adjust price/cost trends and run what-if simulations. | *Planned* |
 | **Phase 4: SAC Export Driver** | Export planning results to SAC-compliant CSV/Excel formats. | *Planned* |
 
