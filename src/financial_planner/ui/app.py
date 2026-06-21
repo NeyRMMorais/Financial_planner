@@ -24,17 +24,24 @@ from src.financial_planner.data_ingestion.price_loader import (
     DEFAULT_RAW_PRICE_FILE,
     load_pricing_data,
 )
+from src.financial_planner.data_ingestion.cost_loader import (
+    DEFAULT_RAW_COST_FILE,
+    load_cost_data,
+)
 from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     ValidationReport,
     validate_grain_uniqueness,
     validate_pricing_completeness,
+    validate_cost_completeness,
+    run_cost_validation,
 )
 from src.financial_planner.calculations.pricing import (
     PriceOverride,
     resolve_monthly_prices,
 )
 from src.financial_planner.calculations.revenue import calculate_revenue
+from src.financial_planner.calculations.costs import calculate_rm_costs
 
 
 st.set_page_config(
@@ -392,39 +399,117 @@ def render_volume_data(volume_data: pd.DataFrame) -> None:
     )
 
 
+def render_cost_checklist(report: ValidationReport) -> None:
+    """Render a visual checklist of cost data quality checks with status emojis."""
+
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("Value is missing or blank" in i.message for i in issues) else "failed"
+    values_status = "passed" if not any(i.column == "Cost" for i in issues) else "failed"
+    periods_status = "passed" if not any("Period must be" in i.message or "Planning period year" in i.message for i in issues) else "failed"
+    grain_status = "passed" if not any("Duplicate cost grain combination" in i.message for i in issues) else "failed"
+
+    st.markdown("### 🔍 Cost Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing or blank cost entries.
+        - {status_emoji(values_status)} **Cost Format & Sign Check**: Ensures RM costs are valid non-negative quantities.
+        - {status_emoji(periods_status)} **Period Verification**: Ensures periods are in 2026 YYYY-MM format.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Ensures exactly one cost record exists per (Plant, Material, Period).
+        """
+    )
+
+
+def render_cost_data(base_costs: pd.DataFrame) -> None:
+    """Render the cost overview and raw dataset preview."""
+
+    st.success("Monthly raw material cost data validated successfully!")
+
+    report = ValidationReport(is_valid=True, issues=[])
+    render_cost_checklist(report)
+
+    st.write("### Base Monthly Raw Material Costs Preview (Top 100 rows)")
+    display_costs = base_costs.copy()
+    display_costs["Date"] = display_costs["Date"].astype(str)
+    display_costs["Cost"] = display_costs["Cost"].map(format_currency)
+
+    st.dataframe(
+        display_costs.head(100),
+        use_container_width=True,
+        hide_index=True,
+        column_order=["Plant", "Material ID", "Period", "Cost"],
+    )
+
+
 def main() -> None:
     """Run the Streamlit app for the first planning workflow step."""
 
-    # Initialize session state variables for volumes, base prices, and overrides
+    # Initialize session state variables for volumes, base prices, overrides, and costs
     if "volume_data" not in st.session_state:
         st.session_state.volume_data = None
     if "base_prices" not in st.session_state:
         st.session_state.base_prices = None
     if "price_overrides" not in st.session_state:
         st.session_state.price_overrides = []
+    if "base_costs" not in st.session_state:
+        st.session_state.base_costs = None
 
     st.title("Financial Planner - Ingestion & Adjustments")
 
-    # Cross-Table Ingestion Completeness Check
+    # Cross-Table Ingestion Completeness Check (Price)
+    has_price_issues = False
     if st.session_state.volume_data is not None and st.session_state.base_prices is not None:
-        completeness_issues = validate_pricing_completeness(
+        price_issues = validate_pricing_completeness(
             st.session_state.volume_data, st.session_state.base_prices
         )
-        if completeness_issues:
+        if price_issues:
+            has_price_issues = True
             st.error("🚨 Missing Unit Prices: Active planned sales combinations lack base prices.")
-            missing_records = []
-            for issue in completeness_issues:
-                missing_records.append(
-                    {
-                        "Active Planned Combination": issue.value,
-                        "Reconciliation Error": issue.message,
-                    }
-                )
-            st.dataframe(pd.DataFrame(missing_records), use_container_width=True, hide_index=True)
+            missing_price_records = [
+                {
+                    "Active Planned Combination": issue.value,
+                    "Reconciliation Error": issue.message,
+                }
+                for issue in price_issues
+            ]
+            st.dataframe(pd.DataFrame(missing_price_records), use_container_width=True, hide_index=True)
         else:
-            st.success("🟢 Ingestion Reconciled: All planned sales combinations have base prices configured.")
+            st.success("🟢 Price Ingestion Reconciled: All planned sales combinations have base prices configured.")
 
-    tab_volume, tab_price, tab_revenue = st.tabs(["📊 Volume Ingestion", "💵 Price Planning", "💰 Revenue Planning"])
+    # Cross-Table Ingestion Completeness Check (Cost)
+    has_cost_issues = False
+    if st.session_state.volume_data is not None and st.session_state.base_costs is not None:
+        cost_issues = validate_cost_completeness(
+            st.session_state.volume_data, st.session_state.base_costs
+        )
+        if cost_issues:
+            has_cost_issues = True
+            st.error("🚨 Missing Raw Material Costs: Active planned volume records lack monthly RM costs.")
+            missing_cost_records = [
+                {
+                    "Active Planned combination & Period": issue.value,
+                    "Reconciliation Error": issue.message,
+                }
+                for issue in cost_issues
+            ]
+            st.dataframe(pd.DataFrame(missing_cost_records), use_container_width=True, hide_index=True)
+        else:
+            st.success("🟢 Cost Ingestion Reconciled: All planned sales records have monthly RM costs configured.")
+
+    tab_volume, tab_price, tab_cost, tab_revenue = st.tabs([
+        "📊 Volume Ingestion",
+        "💵 Price Planning",
+        "🏭 Cost Ingestion",
+        "💰 Revenue & Cost Planning"
+    ])
 
     with tab_volume:
         st.subheader("Monthly Sales Volume Ingestion")
@@ -537,83 +622,172 @@ def main() -> None:
         else:
             st.info("Waiting for base pricing data...")
 
-    with tab_revenue:
-        st.subheader("Planning Revenue Calculations")
-        if st.session_state.volume_data is None or st.session_state.base_prices is None:
-            st.info("Waiting for both sales volume and base pricing data to be loaded...")
+    with tab_cost:
+        st.subheader("Monthly Raw Material Cost Ingestion")
+        c_method = st.radio(
+            "Choose how to load your planning monthly costs file:",
+            options=["Load from Server Path", "Upload CSV File"],
+            key="cost_method",
+            horizontal=True,
+        )
+
+        c_validation_error = None
+
+        if c_method == "Load from Server Path":
+            st.markdown(
+                "Use this option to load monthly RM costs directly from the server's filesystem, "
+                "avoiding WebSocket transfer issues in sandboxed or forwarded environments."
+            )
+            from pathlib import Path
+            c_file_path_str = st.text_input("Server Cost File Path", value=str(DEFAULT_RAW_COST_FILE), key="cost_path")
+            if st.button("Load Cost Data", key="cost_load_btn"):
+                try:
+                    c_file_path = Path(c_file_path_str)
+                    if not c_file_path.exists():
+                        st.error(f"File not found: {c_file_path}")
+                    else:
+                        st.session_state.base_costs = load_cost_data(c_file_path)
+                except PlanningValidationError as error:
+                    c_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
         else:
-            completeness_issues = validate_pricing_completeness(
+            c_uploaded_file = st.file_uploader(
+                "Upload monthly costs input",
+                type=["csv"],
+                accept_multiple_files=False,
+                key="cost_uploader",
+            )
+
+            if c_uploaded_file is not None:
+                try:
+                    st.session_state.base_costs = load_cost_data(c_uploaded_file)
+                except PlanningValidationError as error:
+                    c_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
+
+        if st.session_state.base_costs is not None:
+            render_cost_data(st.session_state.base_costs)
+        elif c_validation_error is not None:
+            st.error("Cost validation failed with critical errors.")
+            render_cost_checklist(c_validation_error)
+            render_troubleshooting_table(c_validation_error)
+        else:
+            st.info("Waiting for monthly raw material cost data...")
+
+    with tab_revenue:
+        st.subheader("Planning Revenue & Raw Material Cost Calculations")
+        if (
+            st.session_state.volume_data is None
+            or st.session_state.base_prices is None
+            or st.session_state.base_costs is None
+        ):
+            st.info(
+                "Waiting for sales volume, base pricing, and monthly raw material cost data to be loaded..."
+            )
+        else:
+            price_issues = validate_pricing_completeness(
                 st.session_state.volume_data, st.session_state.base_prices
             )
-            if completeness_issues:
-                st.warning(
-                    "🚨 Cannot calculate planning revenue: There are missing unit prices. "
-                    "Please resolve the pricing gaps in the 'Price Planning' tab before proceeding."
-                )
+            cost_issues = validate_cost_completeness(
+                st.session_state.volume_data, st.session_state.base_costs
+            )
+
+            if price_issues or cost_issues:
+                if price_issues:
+                    st.warning(
+                        "🚨 Cannot calculate planning revenue: There are missing unit prices. "
+                        "Please resolve the pricing gaps in the 'Price Planning' tab before proceeding."
+                    )
+                if cost_issues:
+                    st.warning(
+                        "🚨 Cannot calculate planning costs: There are missing monthly RM costs. "
+                        "Please resolve the cost gaps in the 'Cost Ingestion' tab before proceeding."
+                    )
             else:
                 # 1. Resolve final monthly prices (with overrides applied)
                 resolved_prices = resolve_monthly_prices(
                     st.session_state.base_prices, st.session_state.price_overrides
                 )
-                
-                # 2. Run revenue calculations
+
+                # 2. Run calculations
                 try:
-                    revenue_df = calculate_revenue(st.session_state.volume_data, resolved_prices)
-                    
+                    # Calculate revenue
+                    revenue_df = calculate_revenue(
+                        st.session_state.volume_data, resolved_prices
+                    )
+                    # Calculate raw material costs
+                    calculated_df = calculate_rm_costs(
+                        revenue_df, st.session_state.base_costs
+                    )
+
                     # 3. Calculate summary metrics using Decimal math
-                    total_volume = sum(revenue_df["Volume"], Decimal("0.000"))
-                    total_revenue = sum(revenue_df["Revenue"], Decimal("0.00"))
-                    
-                    # Safeguard against division by zero
-                    if total_volume > 0:
-                        weighted_avg_price = total_revenue / total_volume
-                    else:
-                        weighted_avg_price = Decimal("0.00")
-                        
+                    total_volume = sum(calculated_df["Volume"], Decimal("0.000"))
+                    total_revenue = sum(calculated_df["Revenue"], Decimal("0.00"))
+                    total_cost = sum(calculated_df["Total RM Cost"], Decimal("0.00"))
+
+                    # Safeguards against division by zero
+                    weighted_avg_price = (
+                        total_revenue / total_volume
+                        if total_volume > 0
+                        else Decimal("0.00")
+                    )
+                    weighted_avg_cost = (
+                        total_cost / total_volume
+                        if total_volume > 0
+                        else Decimal("0.00")
+                    )
+
                     # 4. Render summary metrics cards
-                    cols = st.columns(3)
+                    cols = st.columns(5)
                     cols[0].metric("Total Volume (Tons)", format_decimal(total_volume))
                     cols[1].metric("Total Revenue ($)", format_currency(total_revenue))
-                    cols[2].metric("Weighted Avg Price ($/Ton)", format_currency(weighted_avg_price))
-                    
+                    cols[2].metric("Total RM Cost ($)", format_currency(total_cost))
+                    cols[3].metric("Weighted Avg Price ($/Ton)", format_currency(weighted_avg_price))
+                    cols[4].metric("Weighted Avg RM Cost ($/Ton)", format_currency(weighted_avg_cost))
+
                     st.markdown("---")
-                    
-                    # 5. Display preview of the calculated revenue dataset
-                    st.write("### Calculated Revenue Dataset Preview (Top 100 rows)")
-                    
-                    display_rev = revenue_df.copy()
-                    display_rev["Date"] = display_rev["Date"].astype(str)
-                    display_rev["Volume"] = display_rev["Volume"].map(format_decimal)
-                    display_rev["Price"] = display_rev["Price"].map(format_currency)
-                    display_rev["Revenue"] = display_rev["Revenue"].map(format_currency)
-                    
+
+                    # 5. Display preview of the calculated dataset
+                    st.write("### Calculated Revenue & RM Cost Dataset Preview (Top 100 rows)")
+
+                    display_df = calculated_df.copy()
+                    display_df["Date"] = display_df["Date"].astype(str)
+                    display_df["Volume"] = display_df["Volume"].map(format_decimal)
+                    display_df["Price"] = display_df["Price"].map(format_currency)
+                    display_df["Revenue"] = display_df["Revenue"].map(format_currency)
+                    display_df["Cost"] = display_df["Cost"].map(format_currency)
+                    display_df["Total RM Cost"] = display_df["Total RM Cost"].map(format_currency)
+
                     st.dataframe(
-                        display_rev.head(100),
+                        display_df.head(100),
                         use_container_width=True,
                         hide_index=True,
                         column_order=[
                             "Material",
                             "Material ID",
+                            "Plant",
                             "Date",
-                            "Sold to",
-                            "Ship to",
                             "Volume",
                             "Price",
                             "Revenue",
+                            "Cost",
+                            "Total RM Cost",
                         ],
                     )
-                    
+
                     # 6. Export functionality
-                    csv = revenue_df.to_csv(index=False).encode("utf-8")
+                    csv = calculated_df.to_csv(index=False).encode("utf-8")
                     st.download_button(
-                        label="📥 Download Calculated Revenue (CSV)",
+                        label="📥 Download Calculated Revenue & RM Cost (CSV)",
                         data=csv,
-                        file_name="calculated_revenue_2026.csv",
+                        file_name="calculated_revenue_and_rm_cost_2026.csv",
                         mime="text/csv",
-                        key="dl_revenue_btn",
+                        key="dl_revenue_cost_btn",
                     )
                 except Exception as e:
-                    st.error(f"An error occurred during revenue calculations: {e}")
+                    st.error(f"An error occurred during calculations: {e}")
 
 
 if __name__ == "__main__":

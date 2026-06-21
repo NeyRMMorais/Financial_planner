@@ -54,8 +54,8 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
 
 ## 📊 Current Development Phase
 
-*   **Ingestion Phase (Phase 1):** Currently working on enhancing the validation layer (`validation.py`) and adding a Streamlit Login Gate.
-*   **Roadmap:** Next we will implement the Calculation Engine (Phase 2), UI simulation controls (Phase 3), and SAC export drivers (Phase 4).
+*   **Calculation Engine (Phase 2):** Core Revenue, Pricing, and Monthly Raw Material Cost calculations have been implemented and validated. Streamlit tabs for Price Planning, Cost Ingestion, and Revenue & Cost Planning are fully active.
+*   **Roadmap:** Next we will implement UI simulation controls (Phase 3) and SAC export drivers (Phase 4).
 
 ---
 

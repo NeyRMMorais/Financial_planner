@@ -30,6 +30,7 @@ def valid_record_df() -> pd.DataFrame:
         "Sold to": "Northstar Manufacturing BV",
         "Ship to ID": "SHIP-001-NL",
         "Ship to": "Northstar Manufacturing BV - Rotterdam Plant",
+        "Plant": "PLANT-01",
         "Volume": "125.500",
     }
     return pd.DataFrame([record])

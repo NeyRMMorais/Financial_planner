@@ -28,6 +28,7 @@ PLANNING_VOLUME_COLUMNS: Final[list[str]] = [
     "Sold to",
     "Ship to ID",
     "Ship to",
+    "Plant",
     "Volume",
 ]
 
@@ -62,6 +63,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "Northstar Manufacturing BV",
             "Ship to ID": "SHIP-001-NL",
             "Ship to": "Northstar Manufacturing BV - Rotterdam Plant",
+            "Plant": "PLANT-01",
             "Volume": Decimal("125.500"),
         },
         {
@@ -72,6 +74,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "Northstar Manufacturing BV",
             "Ship to ID": "SHIP-001-NL",
             "Ship to": "Northstar Manufacturing BV - Rotterdam Plant",
+            "Plant": "PLANT-01",
             "Volume": Decimal("132.250"),
         },
         {
@@ -82,6 +85,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "HelioPack GmbH",
             "Ship to ID": "SHIP-014-DE",
             "Ship to": "HelioPack GmbH - Hamburg Site",
+            "Plant": "PLANT-02",
             "Volume": Decimal("87.000"),
         },
         {
@@ -92,6 +96,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "HelioPack GmbH",
             "Ship to ID": "SHIP-014-DE",
             "Ship to": "HelioPack GmbH - Hamburg Site",
+            "Plant": "PLANT-02",
             "Volume": Decimal("0.000"),
         },
         {
@@ -102,6 +107,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "Atlas Components SA",
             "Ship to ID": "SHIP-027-FR",
             "Ship to": "Atlas Components SA - Lyon Warehouse",
+            "Plant": "PLANT-03",
             "Volume": Decimal("41.750"),
         },
         {
@@ -112,6 +118,7 @@ def create_mock_volume_dataset() -> pd.DataFrame:
             "Sold to": "Atlas Components SA",
             "Ship to ID": "SHIP-027-BE",
             "Ship to": "Atlas Components SA - Antwerp DC",
+            "Plant": "PLANT-03",
             "Volume": Decimal("46.125"),
         },
     ]

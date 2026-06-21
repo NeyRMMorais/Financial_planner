@@ -19,6 +19,7 @@ PLANNING_VOLUME_COLUMNS: list[str] = [
     "Sold to",
     "Ship to ID",
     "Ship to",
+    "Plant",
     "Volume",
 ]
 
@@ -27,6 +28,13 @@ PLANNING_PRICE_COLUMNS: list[str] = [
     "Ship to ID",
     "Material ID",
     "Price",
+]
+
+PLANNING_COST_COLUMNS: list[str] = [
+    "Plant",
+    "Material ID",
+    "Period",
+    "Cost",
 ]
 
 
@@ -521,6 +529,272 @@ def validate_pricing_completeness(
                     row_index=None,
                     value=f"Customer: {cust_id}, Ship-to: {ship_id}, Material: {mat_id}",
                     message="Missing unit price in base pricing table",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def validate_cost_schema(df: Any) -> list[ValidationIssue]:
+    """Verify that all required cost columns are present in the dataset."""
+    issues = []
+    missing_columns = [
+        column for column in PLANNING_COST_COLUMNS if column not in df.columns
+    ]
+    for column in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=column,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{column}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_cost_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    """Verify that no required cost fields are null, blank, or whitespace-only."""
+    issues = []
+    check_columns = [
+        column for column in PLANNING_COST_COLUMNS if column in df.columns
+    ]
+
+    for column in check_columns:
+        null_mask = df[column].isna()
+        str_series = df[column].fillna("").astype(str).str.strip()
+        empty_mask = str_series.eq("")
+
+        combined_mask = null_mask | empty_mask
+        if combined_mask.any():
+            for idx in df[combined_mask].index:
+                val = df.at[idx, column]
+                issues.append(
+                    ValidationIssue(
+                        column=column,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Value is missing or blank",
+                        severity="error",
+                    )
+                )
+    return issues
+
+
+def validate_cost_values(df: Any) -> list[ValidationIssue]:
+    """Verify that cost values parse to non-negative Decimal values."""
+    issues = []
+    if "Cost" not in df.columns:
+        return issues
+
+    for idx, val in df["Cost"].items():
+        if pd_is_null_like(val):
+            continue
+
+        if isinstance(val, Decimal):
+            if val < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+            continue
+
+        val_str = str(val).strip()
+        if val_str == "":
+            continue
+
+        try:
+            decimal_value = Decimal(val_str)
+            if decimal_value < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+        except Exception:
+            issues.append(
+                ValidationIssue(
+                    column="Cost",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Cost must be a valid numeric value",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_cost_periods(df: Any) -> list[ValidationIssue]:
+    """Verify that Period values are YYYY-MM formatted and strictly within 2026."""
+    issues = []
+    if "Period" not in df.columns:
+        return issues
+
+    period_regex = re.compile(r"^\d{4}-\d{2}$")
+
+    for idx, val in df["Period"].items():
+        if pd_is_null_like(val):
+            continue
+
+        val_str = str(val).strip()
+        if not period_regex.match(val_str):
+            issues.append(
+                ValidationIssue(
+                    column="Period",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Period must be in YYYY-MM format (e.g. 2026-01)",
+                    severity="error",
+                )
+            )
+            continue
+
+        try:
+            year, month = map(int, val_str.split("-"))
+            if year != 2026:
+                issues.append(
+                    ValidationIssue(
+                        column="Period",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message=f"Planning period year is {year}, but must be exactly 2026",
+                        severity="error",
+                    )
+                )
+            elif month < 1 or month > 12:
+                issues.append(
+                    ValidationIssue(
+                        column="Period",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message=f"Month is {month:02d}, but must be between 01 and 12",
+                        severity="error",
+                    )
+                )
+        except ValueError:
+            issues.append(
+                ValidationIssue(
+                    column="Period",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Invalid period format",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_cost_grain_uniqueness(df: Any) -> list[ValidationIssue]:
+    """Verify that there is exactly one cost record per unique cost combination.
+
+    Duplicate cost rows are treated as errors because they create ambiguity for calculations.
+    """
+    issues = []
+    required_grain = ["Plant", "Material ID", "Period"]
+
+    for column in required_grain:
+        if column not in df.columns:
+            return issues
+
+    temp_df = df[required_grain].copy()
+    for col in required_grain:
+        temp_df[col] = temp_df[col].astype(str).str.strip()
+
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for keys, group in grouped:
+            if isinstance(keys, tuple):
+                plant, mat_id, period = keys
+            else:
+                plant = keys
+                mat_id, period = "", ""
+
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Plant, Material ID, Period",
+                    row_index=None,
+                    value=f"Plant: {plant}, Material: {mat_id}, Period: {period}",
+                    message=f"Duplicate cost grain combination found across rows {row_indices}",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def run_cost_validation(df: Any) -> ValidationReport:
+    """Run all validation rules on the raw string monthly RM cost dataset."""
+    issues = []
+
+    schema_issues = validate_cost_schema(df)
+    issues.extend(schema_issues)
+
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+
+    issues.extend(validate_cost_nulls_and_empty(df))
+    issues.extend(validate_cost_values(df))
+    issues.extend(validate_cost_periods(df))
+    issues.extend(validate_cost_grain_uniqueness(df))
+
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_cost_completeness(
+    volume_df: Any, cost_df: Any
+) -> list[ValidationIssue]:
+    """Verify that every combination/month in the volume dataset has a matching raw material cost.
+
+    Missing cost combinations are treated as errors because they prevent cost calculations.
+    """
+    issues = []
+    volume_grain_cols = ["Plant", "Material ID", "Date"]
+    cost_grain_cols = ["Plant", "Material ID", "Period"]
+
+    # Ensure required columns are present
+    for col in volume_grain_cols:
+        if col not in volume_df.columns:
+            return issues
+    for col in cost_grain_cols:
+        if col not in cost_df.columns:
+            return issues
+
+    # Create a set of unique combinations in the cost dataset for O(1) lookup
+    cost_keys = set(
+        zip(
+            cost_df["Plant"].astype(str).str.strip(),
+            cost_df["Material ID"].astype(str).str.strip(),
+            cost_df["Period"].astype(str).str.strip(),
+        )
+    )
+
+    # Check for missing costs
+    for _, row in volume_df.iterrows():
+        plant = str(row["Plant"]).strip()
+        mat_id = str(row["Material ID"]).strip()
+        date_val = str(row["Date"]).strip()
+
+        if (plant, mat_id, date_val) not in cost_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Cost",
+                    row_index=None,
+                    value=f"Plant: {plant}, Material: {mat_id}, Period: {date_val}",
+                    message="Missing raw material cost for combination and period",
                     severity="error",
                 )
             )

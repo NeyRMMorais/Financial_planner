@@ -1,4 +1,4 @@
-"""Generate the raw volume planning test file used during development."""
+"""Generate the raw volume and monthly cost planning test files used during development."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_volume_input.csv"
 PRICE_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_price_input.csv"
+COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_cost_input.csv"
 ROW_COUNT = 3_000
 TARGET_VOLUME_TONS = Decimal("77000.000")
 
@@ -60,35 +61,40 @@ SHIP_TO_BY_CUSTOMER = {
 }
 
 
+def get_plant_for_ship_to(ship_to_id: str) -> str:
+    """Resolve a deterministic manufacturing plant supplying a given ship-to location."""
+    mapping = {
+        "SHIP-001-NL": "PLANT-01",
+        "SHIP-001-BE": "PLANT-01",
+        "SHIP-014-DE": "PLANT-02",
+        "SHIP-014-PL": "PLANT-02",
+        "SHIP-027-FR": "PLANT-03",
+        "SHIP-027-BE": "PLANT-03",
+        "SHIP-038-LT": "PLANT-04",
+        "SHIP-038-EE": "PLANT-04",
+        "SHIP-052-ES": "PLANT-05",
+        "SHIP-052-PT": "PLANT-05",
+        "SHIP-073-SE": "PLANT-06",
+        "SHIP-073-DK": "PLANT-06",
+    }
+    return mapping.get(ship_to_id, "PLANT-01")
+
+
 def month_label(index: int) -> str:
     """Return a YYYY-MM monthly period label within the 2026 planning year."""
-
     month = index % 12 + 1
     return date(2026, month, 1).strftime("%Y-%m")
 
 
 def planned_volume_for_row(index: int) -> Decimal:
-    """Return the row volume in tons while preserving the exact target total.
-
-    Formula:
-        2,000 rows use 25.667 tons and 1,000 rows use 25.666 tons.
-        This gives ``(2000 * 25.667) + (1000 * 25.666) = 77000.000``.
-    """
-
+    """Return the row volume in tons while preserving the exact target total."""
     if index < 2_000:
         return Decimal("25.667")
     return Decimal("25.666")
 
 
 def generate_rows() -> list[dict[str, str]]:
-    """Build deterministic raw input rows for volume planning tests.
-
-    Business logic:
-        Each row is a source-style demand record by material, month, sold-to
-        customer, and ship-to receiving entity. Values are emitted as strings so
-        CSV readers can convert volume to ``Decimal`` instead of binary floats.
-    """
-
+    """Build deterministic raw input rows for volume planning tests."""
     rows = []
     for index in range(ROW_COUNT):
         material, material_id = MATERIALS[index % len(MATERIALS)]
@@ -106,6 +112,7 @@ def generate_rows() -> list[dict[str, str]]:
                 "Sold to": sold_to,
                 "Ship to ID": ship_to_id,
                 "Ship to": ship_to,
+                "Plant": get_plant_for_ship_to(ship_to_id),
                 "Volume": f"{planned_volume_for_row(index):.3f}",
             }
         )
@@ -115,7 +122,6 @@ def generate_rows() -> list[dict[str, str]]:
 
 def write_raw_volume_test_file() -> Path:
     """Write the raw CSV file used as the first development input source."""
-
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     rows = generate_rows()
 
@@ -137,7 +143,6 @@ def write_raw_volume_test_file() -> Path:
 
 def get_base_price(material_id: str, sold_to_id: str, ship_to_id: str) -> Decimal:
     """Compute a deterministic mock unit price per ton."""
-
     base_map = {
         "MAT-1001": Decimal("250.00"),
         "MAT-2004": Decimal("315.50"),
@@ -153,7 +158,6 @@ def get_base_price(material_id: str, sold_to_id: str, ship_to_id: str) -> Decima
 
 def generate_price_rows() -> list[dict[str, str]]:
     """Build deterministic raw price records for the planning year combinations."""
-
     rows = []
     # Generate one price for every unique combination of material, customer, and ship-to
     for _, material_id in MATERIALS:
@@ -173,7 +177,6 @@ def generate_price_rows() -> list[dict[str, str]]:
 
 def write_raw_price_test_file() -> Path:
     """Write the raw pricing CSV file used as input source."""
-
     PRICE_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     rows = generate_price_rows()
 
@@ -185,8 +188,60 @@ def write_raw_price_test_file() -> Path:
     return PRICE_OUTPUT_PATH
 
 
+def get_base_cost(plant_id: str, material_id: str, period_str: str) -> Decimal:
+    """Compute a deterministic mock unit raw material cost per ton."""
+    base_map = {
+        "MAT-1001": Decimal("150.00"),
+        "MAT-2004": Decimal("180.50"),
+        "MAT-3098": Decimal("110.00"),
+        "MAT-4120": Decimal("240.25"),
+        "MAT-5185": Decimal("55.00"),
+    }
+    base = base_map.get(material_id, Decimal("60.00"))
+    plant_num = int(plant_id.split("-")[1])
+    month_num = int(period_str.split("-")[1])
+    return base + Decimal(f"{plant_num * 5.75 + month_num * 1.50:.2f}")
+
+
+def generate_cost_rows() -> list[dict[str, str]]:
+    """Build deterministic raw monthly RM cost records for the planning year combinations."""
+    rows = []
+    # Generate a monthly cost for each Plant, Material ID, and Period combination
+    plants = [f"PLANT-{i:02d}" for i in range(1, 7)]
+    periods = [f"2026-{m:02d}" for m in range(1, 13)]
+
+    for plant in plants:
+        for _, material_id in MATERIALS:
+            for period in periods:
+                cost = get_base_cost(plant, material_id, period)
+                rows.append(
+                    {
+                        "Plant": plant,
+                        "Material ID": material_id,
+                        "Period": period,
+                        "Cost": f"{cost:.2f}",
+                    }
+                )
+    return rows
+
+
+def write_raw_cost_test_file() -> Path:
+    """Write the raw monthly cost CSV file used as input source."""
+    COST_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rows = generate_cost_rows()
+
+    with COST_OUTPUT_PATH.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return COST_OUTPUT_PATH
+
+
 if __name__ == "__main__":
     vol_path = write_raw_volume_test_file()
     price_path = write_raw_price_test_file()
+    cost_path = write_raw_cost_test_file()
     print(f"Generated volume file: {vol_path}")
     print(f"Generated price file: {price_path}")
+    print(f"Generated cost file: {cost_path}")

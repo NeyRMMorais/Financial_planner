@@ -72,7 +72,7 @@ def test_load_planning_volume_data_accepts_uploaded_file_like_source() -> None:
                 (
                     "Premium Resin A,MAT-1001,2026-01,CUST-001,"
                     "Northstar Manufacturing BV,SHIP-001-NL,"
-                    "Northstar Manufacturing BV - Rotterdam Plant,25.667"
+                    "Northstar Manufacturing BV - Rotterdam Plant,PLANT-01,25.667"
                 ),
             ]
         )
