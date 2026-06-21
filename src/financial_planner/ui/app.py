@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from src.financial_planner.data_ingestion.data_loader import (
+    DEFAULT_RAW_VOLUME_FILE,
     PLANNING_VOLUME_COLUMNS,
     load_planning_volume_data,
 )
@@ -99,14 +100,8 @@ def render_monthly_volume(volume_data: pd.DataFrame) -> None:
     )
 
 
-def render_uploaded_file(uploaded_file: BytesIO) -> None:
-    """Validate and display an uploaded raw planning volume file."""
-
-    try:
-        volume_data = load_planning_volume_data(uploaded_file)
-    except Exception as error:
-        st.error(str(error))
-        return
+def render_volume_data(volume_data: pd.DataFrame) -> None:
+    """Render the core planning file validation summary and preview."""
 
     st.success("Volume input validated")
     render_ingestion_summary(volume_data)
@@ -128,17 +123,48 @@ def main() -> None:
 
     st.title("Volume Planning")
 
-    uploaded_file = st.file_uploader(
-        "Upload volume input",
-        type=["csv"],
-        accept_multiple_files=False,
+    st.subheader("Select Ingestion Method")
+    method = st.radio(
+        "Choose how to load your planning volume file:",
+        options=["Load from Server Path", "Upload CSV File"],
+        horizontal=True,
     )
 
-    if uploaded_file is None:
-        st.info("Waiting for volume input")
-        return
+    volume_data = None
 
-    render_uploaded_file(uploaded_file)
+    if method == "Load from Server Path":
+        st.markdown(
+            "Use this option to load data directly from the server's filesystem, "
+            "avoiding WebSocket transfer issues in sandboxed or forwarded environments."
+        )
+        from pathlib import Path
+        file_path_str = st.text_input("Server File Path", value=str(DEFAULT_RAW_VOLUME_FILE))
+        if st.button("Load Data"):
+            try:
+                file_path = Path(file_path_str)
+                if not file_path.exists():
+                    st.error(f"File not found: {file_path}")
+                else:
+                    volume_data = load_planning_volume_data(file_path)
+            except Exception as error:
+                st.error(str(error))
+    else:
+        uploaded_file = st.file_uploader(
+            "Upload volume input",
+            type=["csv"],
+            accept_multiple_files=False,
+        )
+
+        if uploaded_file is not None:
+            try:
+                volume_data = load_planning_volume_data(uploaded_file)
+            except Exception as error:
+                st.error(str(error))
+
+    if volume_data is not None:
+        render_volume_data(volume_data)
+    else:
+        st.info("Waiting for volume input data...")
 
 
 if __name__ == "__main__":
