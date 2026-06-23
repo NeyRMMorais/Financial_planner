@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 
 # Force reload of local project modules on Streamlit rerun to avoid stale imports/errors
 for _mod in list(sys.modules.keys()):
@@ -61,6 +62,13 @@ from src.financial_planner.calculations.pricing import (
     resolve_monthly_prices,
 )
 from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
+from src.financial_planner.data_ingestion.scenario_manager import (
+    list_scenarios,
+    create_scenario,
+    load_scenario_data,
+    save_scenario_data,
+    diff_scenarios_inputs,
+)
 
 
 st.set_page_config(
@@ -658,7 +666,41 @@ def render_plant_currency_data(plant_currency: pd.DataFrame) -> None:
 def main() -> None:
     """Run the Streamlit app for the first planning workflow step."""
 
-    # Initialize session state variables for volumes, base prices, overrides, and costs
+    # Initialize active scenario and baseline if not set
+    if "active_scenario" not in st.session_state:
+        st.session_state.active_scenario = "Baseline"
+        try:
+            from src.financial_planner.data_ingestion.scenario_manager import ensure_baseline_exists
+            ensure_baseline_exists()
+            init_data = load_scenario_data("Baseline")
+            st.session_state.volume_data = init_data["volume_data"]
+            st.session_state.base_prices = init_data["base_prices"]
+            st.session_state.price_overrides = init_data["price_overrides"]
+            st.session_state.base_costs = init_data["base_costs"]
+            st.session_state.base_var_costs = init_data["base_var_costs"]
+            st.session_state.base_dist_costs = init_data["base_dist_costs"]
+            st.session_state.fx_rates = init_data["fx_rates"]
+            st.session_state.plant_currency = init_data["plant_currency"]
+        except Exception as e:
+            st.error(f"Error auto-initializing Baseline scenario: {e}")
+
+    # Helper function to switch active scenario
+    def switch_active_scenario(name: str) -> None:
+        try:
+            data = load_scenario_data(name)
+            st.session_state.active_scenario = name
+            st.session_state.volume_data = data["volume_data"]
+            st.session_state.base_prices = data["base_prices"]
+            st.session_state.price_overrides = data["price_overrides"]
+            st.session_state.base_costs = data["base_costs"]
+            st.session_state.base_var_costs = data["base_var_costs"]
+            st.session_state.base_dist_costs = data["base_dist_costs"]
+            st.session_state.fx_rates = data["fx_rates"]
+            st.session_state.plant_currency = data["plant_currency"]
+        except Exception as e:
+            st.error(f"Failed to load scenario '{name}': {e}")
+
+    # Initialize fallback session state variables for safety
     if "volume_data" not in st.session_state:
         st.session_state.volume_data = None
     if "base_prices" not in st.session_state:
@@ -675,6 +717,83 @@ def main() -> None:
         st.session_state.fx_rates = None
     if "plant_currency" not in st.session_state:
         st.session_state.plant_currency = None
+
+    # Render Sidebar Scenario Manager
+    st.sidebar.title("📁 Scenario Manager")
+    
+    scenarios = list_scenarios()
+    scenario_names = [s["name"] for s in scenarios]
+    
+    current_idx = 0
+    if st.session_state.active_scenario in scenario_names:
+        current_idx = scenario_names.index(st.session_state.active_scenario)
+        
+    selected_scenario = st.sidebar.selectbox(
+        "Active Scenario",
+        options=scenario_names,
+        index=current_idx,
+        key="active_scenario_select"
+    )
+    
+    if selected_scenario != st.session_state.active_scenario:
+        switch_active_scenario(selected_scenario)
+        st.rerun()
+        
+    # Show active metadata
+    meta = next((s for s in scenarios if s["name"] == st.session_state.active_scenario), None)
+    if meta:
+        if meta.get("description"):
+            st.sidebar.info(f"**Notes**: {meta['description']}")
+        if meta.get("base_scenario"):
+            st.sidebar.text(f"Derived from: {meta['base_scenario']}")
+        if meta.get("created_at"):
+            try:
+                dt = datetime.fromisoformat(meta["created_at"])
+                st.sidebar.text(f"Created: {dt.strftime('%Y-%m-%d %H:%M')}")
+            except Exception:
+                pass
+
+    # Save button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("💾 Save Active Scenario", type="primary", use_container_width=True):
+        data_dict = {
+            "volume_data": st.session_state.volume_data,
+            "base_prices": st.session_state.base_prices,
+            "price_overrides": st.session_state.price_overrides,
+            "base_costs": st.session_state.base_costs,
+            "base_var_costs": st.session_state.base_var_costs,
+            "base_dist_costs": st.session_state.base_dist_costs,
+            "fx_rates": st.session_state.fx_rates,
+            "plant_currency": st.session_state.plant_currency,
+        }
+        try:
+            save_scenario_data(st.session_state.active_scenario, data_dict)
+            st.sidebar.success(f"Scenario '{st.session_state.active_scenario}' saved successfully!")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Error saving scenario: {e}")
+
+    # Create section
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🆕 Create New Scenario"):
+        new_name = st.text_input("New Scenario Name", key="new_scen_name")
+        new_desc = st.text_area("Description/Notes", key="new_scen_desc")
+        
+        clone_options = ["None (Start from scratch)"] + scenario_names
+        clone_from = st.selectbox("Clone From", options=clone_options, key="new_scen_clone")
+        
+        if st.button("Initialize Scenario", use_container_width=True):
+            if not new_name.strip():
+                st.error("Please enter a valid scenario name.")
+            else:
+                base_scen = None if clone_from == "None (Start from scratch)" else clone_from
+                try:
+                    create_scenario(new_name, base_scenario=base_scen, description=new_desc)
+                    switch_active_scenario(new_name)
+                    st.success(f"Scenario '{new_name}' created!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
     st.title("Financial Planner - Ingestion & Adjustments")
 
@@ -784,14 +903,15 @@ def main() -> None:
         else:
             st.success("🟢 FX & Currency Ingestion Reconciled: All active volume rows have complete plant mappings and period exchange rates.")
 
-    tab_volume, tab_price, tab_cost, tab_var_cost, tab_dist_cost, tab_fx, tab_revenue = st.tabs([
+    tab_volume, tab_price, tab_cost, tab_var_cost, tab_dist_cost, tab_fx, tab_revenue, tab_compare = st.tabs([
         "📊 Volume Ingestion",
         "💵 Price Planning",
         "🏭 RM Cost Ingestion",
         "🏭 Variable Cost Ingestion",
         "🚚 Distribution Cost Ingestion",
         "💱 FX & Currency Ingestion",
-        "💰 Revenue & Cost Planning"
+        "💰 Revenue & Cost Planning",
+        "⚖️ Scenario Comparison",
     ])
 
     with tab_volume:
@@ -1405,6 +1525,156 @@ def main() -> None:
                     )
                 except Exception as e:
                     st.error(f"An error occurred during calculations: {e}")
+
+    with tab_compare:
+        st.subheader("⚖️ Scenario Comparison Dashboard")
+        st.markdown("Compare the simulation results of any two scenarios side-by-side.")
+
+        # 1. Select Scenarios
+        scenarios = list_scenarios()
+        scen_names = [s["name"] for s in scenarios]
+
+        col_select1, col_select2 = st.columns(2)
+        with col_select1:
+            scen_a = st.selectbox("Scenario A (Base)", options=scen_names, index=0, key="compare_scen_a")
+        with col_select2:
+            default_b_idx = min(1, len(scen_names) - 1)
+            scen_b = st.selectbox("Scenario B (Comparison)", options=scen_names, index=default_b_idx, key="compare_scen_b")
+
+        if scen_a == scen_b:
+            st.warning("Please select two different scenarios to compare.")
+        else:
+            try:
+                # Load Scenario A data
+                data_a = load_scenario_data(scen_a)
+                missing_a = [k for k, v in data_a.items() if v is None and k != "price_overrides"]
+                
+                # Load Scenario B data
+                data_b = load_scenario_data(scen_b)
+                missing_b = [k for k, v in data_b.items() if v is None and k != "price_overrides"]
+
+                if missing_a:
+                    st.error(f"Scenario A ('{scen_a}') is incomplete. Missing inputs: {missing_a}")
+                elif missing_b:
+                    st.error(f"Scenario B ('{scen_b}') is incomplete. Missing inputs: {missing_b}")
+                else:
+                    # Run Scenario A
+                    price_over_a = data_a["price_overrides"]
+                    prices_resolved_a = resolve_monthly_prices(data_a["base_prices"], price_over_a)
+                    df_calc_a = run_simulation_pipeline(
+                        volume_df=data_a["volume_data"],
+                        resolved_prices=prices_resolved_a,
+                        base_costs=data_a["base_costs"],
+                        base_var_costs=data_a["base_var_costs"],
+                        base_dist_costs=data_a["base_dist_costs"],
+                        plant_currency_mapping_df=data_a["plant_currency"],
+                        fx_rates_df=data_a["fx_rates"],
+                    )
+                    metrics_a = generate_summary_metrics(df_calc_a)
+
+                    # Run Scenario B
+                    price_over_b = data_b["price_overrides"]
+                    prices_resolved_b = resolve_monthly_prices(data_b["base_prices"], price_over_b)
+                    df_calc_b = run_simulation_pipeline(
+                        volume_df=data_b["volume_data"],
+                        resolved_prices=prices_resolved_b,
+                        base_costs=data_b["base_costs"],
+                        base_var_costs=data_b["base_var_costs"],
+                        base_dist_costs=data_b["base_dist_costs"],
+                        plant_currency_mapping_df=data_b["plant_currency"],
+                        fx_rates_df=data_b["fx_rates"],
+                    )
+                    metrics_b = generate_summary_metrics(df_calc_b)
+
+                    # Render side-by-side metrics
+                    def render_diff_metric(label, val_a, val_b, format_fn, is_percentage=False):
+                        delta = val_b - val_a
+                        delta_pct = (delta / val_a * 100) if val_a != 0 else Decimal("0.0")
+                        delta_str = format_fn(delta) if not is_percentage else f"{delta:.2f}%"
+                        if delta > 0:
+                            delta_str = "+" + delta_str
+                        st.markdown(f"**{label}**")
+                        col1, col2, col3 = st.columns(3)
+                        col1.text(f"A: {format_fn(val_a)}")
+                        col2.text(f"B: {format_fn(val_b)}")
+                        if delta == 0:
+                            col3.markdown("`flat` 0.0%")
+                        elif delta > 0:
+                            col3.markdown(f"<span style='color:green;'>▲ {delta_str} (+{delta_pct:.1f}%)</span>", unsafe_allow_html=True)
+                        else:
+                            col3.markdown(f"<span style='color:red;'>▼ {delta_str} ({delta_pct:.1f}%)</span>", unsafe_allow_html=True)
+
+                    st.markdown("### 📊 Key Performance Indicator Comparison (USD)")
+                    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+                    with col_kpi1:
+                        st.markdown("#### Volume & Revenue")
+                        render_diff_metric("Total Volume (Tons)", metrics_a["total_volume"], metrics_b["total_volume"], format_decimal)
+                        render_diff_metric("Total Revenue ($)", metrics_a["total_revenue_usd"], metrics_b["total_revenue_usd"], format_currency)
+                        render_diff_metric("Weighted Avg Price ($/T)", metrics_a["weighted_avg_price_usd"], metrics_b["weighted_avg_price_usd"], format_currency)
+                    with col_kpi2:
+                        st.markdown("#### Costs")
+                        render_diff_metric("Total RM Cost ($)", metrics_a["total_rm_cost_usd"], metrics_b["total_rm_cost_usd"], format_currency)
+                        render_diff_metric("Total Variable Cost ($)", metrics_a["total_var_cost_usd"], metrics_b["total_var_cost_usd"], format_currency)
+                        render_diff_metric("Total Dist Cost ($)", metrics_a["total_dist_cost_usd"], metrics_b["total_dist_cost_usd"], format_currency)
+                    with col_kpi3:
+                        st.markdown("#### Profitability")
+                        render_diff_metric("Total VCM ($)", metrics_a["total_vcm_usd"], metrics_b["total_vcm_usd"], format_currency)
+                        render_diff_metric("Weighted Avg VCM ($/T)", metrics_a["weighted_avg_vcm_usd"], metrics_b["weighted_avg_vcm_usd"], format_currency)
+
+                    st.markdown("---")
+
+                    # Variance analysis (Plant)
+                    st.markdown("### 🏭 VCM Variance Analysis by Plant")
+                    plant_a = df_calc_a.groupby("Plant")[["Volume", "VCM_USD"]].sum().reset_index()
+                    plant_b = df_calc_b.groupby("Plant")[["Volume", "VCM_USD"]].sum().reset_index()
+                    plant_merged = pd.merge(plant_a, plant_b, on="Plant", suffixes=("_A", "_B"), how="outer").fillna(0)
+                    plant_merged["Volume Delta"] = plant_merged["Volume_B"] - plant_merged["Volume_A"]
+                    plant_merged["VCM Delta"] = plant_merged["VCM_USD_B"] - plant_merged["VCM_USD_A"]
+
+                    plant_disp = plant_merged.copy()
+                    plant_disp["Volume (A)"] = plant_disp["Volume_A"].map(format_decimal)
+                    plant_disp["Volume (B)"] = plant_disp["Volume_B"].map(format_decimal)
+                    plant_disp["Volume Delta"] = plant_disp["Volume Delta"].map(format_decimal)
+                    plant_disp["VCM (A)"] = plant_disp["VCM_USD_A"].map(format_currency)
+                    plant_disp["VCM (B)"] = plant_disp["VCM_USD_B"].map(format_currency)
+                    plant_disp["VCM Delta"] = plant_disp["VCM Delta"].map(format_currency)
+
+                    st.dataframe(
+                        plant_disp[["Plant", "Volume (A)", "Volume (B)", "Volume Delta", "VCM (A)", "VCM (B)", "VCM Delta"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    # Variance analysis (Material)
+                    st.markdown("### 📦 VCM Variance Analysis by Material")
+                    mat_a = df_calc_a.groupby(["Material", "Material ID"])[["Volume", "VCM_USD"]].sum().reset_index()
+                    mat_b = df_calc_b.groupby(["Material", "Material ID"])[["Volume", "VCM_USD"]].sum().reset_index()
+                    mat_merged = pd.merge(mat_a, mat_b, on=["Material", "Material ID"], suffixes=("_A", "_B"), how="outer").fillna(0)
+                    mat_merged["Volume Delta"] = mat_merged["Volume_B"] - mat_merged["Volume_A"]
+                    mat_merged["VCM Delta"] = mat_merged["VCM_USD_B"] - mat_merged["VCM_USD_A"]
+
+                    mat_disp = mat_merged.copy()
+                    mat_disp["Volume (A)"] = mat_disp["Volume_A"].map(format_decimal)
+                    mat_disp["Volume (B)"] = mat_disp["Volume_B"].map(format_decimal)
+                    mat_disp["Volume Delta"] = mat_disp["Volume Delta"].map(format_decimal)
+                    mat_disp["VCM (A)"] = mat_disp["VCM_USD_A"].map(format_currency)
+                    mat_disp["VCM (B)"] = mat_disp["VCM_USD_B"].map(format_currency)
+                    mat_disp["VCM Delta"] = mat_disp["VCM Delta"].map(format_currency)
+
+                    st.dataframe(
+                        mat_disp[["Material", "Material ID", "Volume (A)", "Volume (B)", "Volume Delta", "VCM (A)", "VCM (B)", "VCM Delta"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    # Input Diff Log
+                    st.markdown("---")
+                    st.markdown("### 📝 Input Changes Log (Scenario B compared to Scenario A)")
+                    diff_logs = diff_scenarios_inputs(scen_a, scen_b)
+                    for log in diff_logs:
+                        st.markdown(f"- {log}")
+            except Exception as e:
+                st.error(f"Error running comparison: {e}")
 
 
 if __name__ == "__main__":
