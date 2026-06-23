@@ -1329,9 +1329,9 @@ def main() -> None:
                         display_df["Cost"] = display_df["RM_Cost_USD"].map(format_currency)
                         display_df["Total RM Cost"] = display_df["Total_RM_Cost_USD"].map(format_currency)
                         display_df["Variable Cost"] = display_df["Var_Cost_USD"].map(format_currency)
-                        display_df["Total Variable Cost"] = display_df["Total_Var_Cost_USD"].map(format_currency)
+                        display_df["Total Variable Cost"] = display_df["Total_Variable_Cost_USD"].map(format_currency)
                         display_df["Distribution Cost"] = display_df["Dist_Cost_USD"].map(format_currency)
-                        display_df["Total Distribution Cost"] = display_df["Total_Dist_Cost_USD"].map(format_currency)
+                        display_df["Total Distribution Cost"] = display_df["Total_Distribution_Cost_USD"].map(format_currency)
                         display_df["Unit VCM"] = display_df["Unit_VCM_USD"].map(format_currency)
                         display_df["VCM"] = display_df["VCM_USD"].map(format_currency)
                         
@@ -1360,9 +1360,9 @@ def main() -> None:
                         display_df["Cost"] = display_df.apply(lambda row: format_local_currency(row["RM_Cost_LC"], row["Plant_Currency"]), axis=1)
                         display_df["Total RM Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_RM_Cost_LC"], row["Plant_Currency"]), axis=1)
                         display_df["Variable Cost"] = display_df.apply(lambda row: format_local_currency(row["Var_Cost_LC"], row["Plant_Currency"]), axis=1)
-                        display_df["Total Variable Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Var_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Total Variable Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Variable_Cost_LC"], row["Plant_Currency"]), axis=1)
                         display_df["Distribution Cost"] = display_df.apply(lambda row: format_local_currency(row["Dist_Cost_LC"], row["Plant_Currency"]), axis=1)
-                        display_df["Total Distribution Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Dist_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Total Distribution Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Distribution_Cost_LC"], row["Plant_Currency"]), axis=1)
                         display_df["Unit VCM"] = display_df.apply(lambda row: format_local_currency(row["Unit_VCM_LC"], row["Plant_Currency"]), axis=1)
                         display_df["VCM"] = display_df.apply(lambda row: format_local_currency(row["VCM_LC"], row["Plant_Currency"]), axis=1)
 
