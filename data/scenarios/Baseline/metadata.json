@@ -1,0 +1,7 @@
+{
+  "name": "Baseline",
+  "created_at": "2026-06-23T22:02:23.232701",
+  "base_scenario": null,
+  "description": "Baseline scenario initialized from mock raw data.",
+  "change_log": []
+}
