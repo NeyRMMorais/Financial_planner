@@ -51,9 +51,7 @@ from src.financial_planner.calculations.pricing import (
     PriceOverride,
     resolve_monthly_prices,
 )
-from src.financial_planner.calculations.revenue import calculate_revenue
-from src.financial_planner.calculations.costs import calculate_rm_costs, calculate_variable_costs, calculate_distribution_costs
-from src.financial_planner.calculations.margin import calculate_vcm
+from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
 
 
 st.set_page_config(
@@ -990,61 +988,33 @@ def main() -> None:
                     st.session_state.base_prices, st.session_state.price_overrides
                 )
 
-                # 2. Run calculations
                 try:
-                    # Calculate revenue
-                    revenue_df = calculate_revenue(
-                        st.session_state.volume_data, resolved_prices
+                    # 2. Run simulation pipeline
+                    calculated_df = run_simulation_pipeline(
+                        volume_df=st.session_state.volume_data,
+                        resolved_prices=resolved_prices,
+                        base_costs=st.session_state.base_costs,
+                        base_var_costs=st.session_state.base_var_costs,
+                        base_dist_costs=st.session_state.base_dist_costs,
                     )
-                    # Calculate raw material costs
-                    rm_calc_df = calculate_rm_costs(
-                        revenue_df, st.session_state.base_costs
-                    )
-                    # Calculate variable costs
-                    var_calc_df = calculate_variable_costs(
-                        rm_calc_df, st.session_state.base_var_costs
-                    )
-                    # Calculate distribution costs
-                    dist_calc_df = calculate_distribution_costs(
-                        var_calc_df, st.session_state.base_dist_costs
-                    )
-                    # Calculate Variable Contribution Margin (VCM)
-                    calculated_df = calculate_vcm(dist_calc_df)
 
-                    # 3. Calculate summary metrics using Decimal math
-                    total_volume = sum(calculated_df["Volume"], Decimal("0.000"))
-                    total_revenue = sum(calculated_df["Revenue"], Decimal("0.00"))
-                    total_rm_cost = sum(calculated_df["Total RM Cost"], Decimal("0.00"))
-                    total_var_cost = sum(calculated_df["Total Variable Cost"], Decimal("0.00"))
-                    total_dist_cost = sum(calculated_df["Total Distribution Cost"], Decimal("0.00"))
-                    total_vcm = sum(calculated_df["VCM"], Decimal("0.00"))
-
-                    # Safeguards against division by zero
-                    weighted_avg_price = (
-                        total_revenue / total_volume
-                        if total_volume > 0
-                        else Decimal("0.00")
-                    )
-                    weighted_avg_vcm = (
-                        total_vcm / total_volume
-                        if total_volume > 0
-                        else Decimal("0.00")
-                    )
+                    # 3. Generate summary metrics
+                    metrics = generate_summary_metrics(calculated_df)
 
                     # 4. Render summary metrics cards
                     st.markdown("#### Total Volume, Revenue & Margin")
                     cols1 = st.columns(4)
-                    cols1[0].metric("Total Volume (T)", format_decimal(total_volume))
-                    cols1[1].metric("Total Revenue ($)", format_currency(total_revenue))
-                    cols1[2].metric("Total VCM ($)", format_currency(total_vcm))
-                    cols1[3].metric("Avg VCM ($/T)", format_currency(weighted_avg_vcm))
+                    cols1[0].metric("Total Volume (T)", format_decimal(metrics["total_volume"]))
+                    cols1[1].metric("Total Revenue ($)", format_currency(metrics["total_revenue"]))
+                    cols1[2].metric("Total VCM ($)", format_currency(metrics["total_vcm"]))
+                    cols1[3].metric("Avg VCM ($/T)", format_currency(metrics["weighted_avg_vcm"]))
 
                     st.markdown("#### Operational Costs")
                     cols2 = st.columns(4)
-                    cols2[0].metric("Total RM Cost ($)", format_currency(total_rm_cost))
-                    cols2[1].metric("Total Var Cost ($)", format_currency(total_var_cost))
-                    cols2[2].metric("Total Dist Cost ($)", format_currency(total_dist_cost))
-                    cols2[3].metric("Avg Price ($/T)", format_currency(weighted_avg_price))
+                    cols2[0].metric("Total RM Cost ($)", format_currency(metrics["total_rm_cost"]))
+                    cols2[1].metric("Total Var Cost ($)", format_currency(metrics["total_var_cost"]))
+                    cols2[2].metric("Total Dist Cost ($)", format_currency(metrics["total_dist_cost"]))
+                    cols2[3].metric("Avg Price ($/T)", format_currency(metrics["weighted_avg_price"]))
 
                     st.markdown("---")
 
