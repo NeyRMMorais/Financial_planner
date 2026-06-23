@@ -43,6 +43,12 @@ PLANNING_VARIABLE_COST_COLUMNS: list[str] = [
     "Variable Cost",
 ]
 
+PLANNING_DIST_COST_COLUMNS: list[str] = [
+    "Ship to",
+    "Ship to ID",
+    "Distribution Cost",
+]
+
 
 @dataclass
 class ValidationIssue:
@@ -977,6 +983,182 @@ def validate_variable_cost_completeness(
                     row_index=None,
                     value=f"Material ID: {mat_id}",
                     message="Missing variable cost for Material",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def validate_dist_cost_schema(df: Any) -> list[ValidationIssue]:
+    """Verify that all required distribution cost columns are present."""
+    issues = []
+    missing_columns = [
+        column for column in PLANNING_DIST_COST_COLUMNS if column not in df.columns
+    ]
+    for column in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=column,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{column}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_dist_cost_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    """Verify that no required distribution cost fields are null or blank."""
+    issues = []
+    check_columns = [
+        column for column in PLANNING_DIST_COST_COLUMNS if column in df.columns
+    ]
+
+    for column in check_columns:
+        null_mask = df[column].isna()
+        str_series = df[column].fillna("").astype(str).str.strip()
+        empty_mask = str_series.eq("")
+
+        combined_mask = null_mask | empty_mask
+        if combined_mask.any():
+            for idx in df[combined_mask].index:
+                val = df.at[idx, column]
+                issues.append(
+                    ValidationIssue(
+                        column=column,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Value is missing or blank",
+                        severity="error",
+                    )
+                )
+
+    return issues
+
+
+def validate_dist_cost_values(df: Any) -> list[ValidationIssue]:
+    """Verify that distribution cost values parse to non-negative Decimal values."""
+    issues = []
+    if "Distribution Cost" not in df.columns:
+        return issues
+
+    for idx, val in df["Distribution Cost"].items():
+        if pd_is_null_like(val):
+            continue
+
+        if isinstance(val, Decimal):
+            if val < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Distribution Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Distribution Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+            continue
+
+        val_str = str(val).strip()
+        if val_str == "":
+            continue
+
+        try:
+            decimal_value = Decimal(val_str)
+            if decimal_value < 0:
+                issues.append(
+                    ValidationIssue(
+                        column="Distribution Cost",
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message="Distribution Cost cannot be negative",
+                        severity="error",
+                    )
+                )
+        except Exception:
+            issues.append(
+                ValidationIssue(
+                    column="Distribution Cost",
+                    row_index=int(idx) + 1,
+                    value=val,
+                    message="Distribution Cost must be a valid numeric value",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_dist_cost_grain_uniqueness(df: Any) -> list[ValidationIssue]:
+    """Verify that there is exactly one distribution cost record per Ship to ID."""
+    issues = []
+    required_grain = ["Ship to ID"]
+
+    for column in required_grain:
+        if column not in df.columns:
+            return issues
+
+    temp_df = df[required_grain].copy()
+    for col in required_grain:
+        temp_df[col] = temp_df[col].astype(str).str.strip()
+
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for ship_id, group in grouped:
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Ship to ID",
+                    row_index=None,
+                    value=f"Ship to: {ship_id}",
+                    message=f"Duplicate distribution cost found for Ship to across rows {row_indices}",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def run_dist_cost_validation(df: Any) -> ValidationReport:
+    """Run all validation rules on the raw string annual distribution cost dataset."""
+    issues = []
+
+    schema_issues = validate_dist_cost_schema(df)
+    issues.extend(schema_issues)
+
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+
+    issues.extend(validate_dist_cost_nulls_and_empty(df))
+    issues.extend(validate_dist_cost_values(df))
+    issues.extend(validate_dist_cost_grain_uniqueness(df))
+
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_dist_cost_completeness(
+    volume_df: Any, dist_cost_df: Any
+) -> list[ValidationIssue]:
+    """Verify that every Ship to ID in the volume dataset has a matching distribution cost."""
+    issues = []
+    if "Ship to ID" not in volume_df.columns or "Ship to ID" not in dist_cost_df.columns:
+        return issues
+
+    dist_cost_keys = set(dist_cost_df["Ship to ID"].astype(str).str.strip())
+
+    for _, row in volume_df.iterrows():
+        ship_id = str(row["Ship to ID"]).strip()
+
+        if ship_id not in dist_cost_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Distribution Cost",
+                    row_index=None,
+                    value=f"Ship to ID: {ship_id}",
+                    message="Missing distribution cost for Ship to",
                     severity="error",
                 )
             )

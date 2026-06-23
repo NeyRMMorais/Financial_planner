@@ -139,3 +139,63 @@ def calculate_variable_costs(
     merged["Total Variable Cost"] = merged["Volume"] * merged["Variable Cost"]
 
     return merged
+
+
+def calculate_distribution_costs(
+    volume_df: pd.DataFrame,
+    dist_cost_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Calculate annual distribution costs for all planning combinations.
+
+    Formula:
+        Total Distribution Cost = Volume * Distribution Cost
+
+    Args:
+        volume_df: DataFrame with columns including:
+            ['Ship to ID', 'Volume']
+        dist_cost_df: DataFrame with columns including:
+            ['Ship to ID', 'Distribution Cost']
+
+    Returns:
+        A DataFrame containing all columns from volume_df plus:
+            - 'Distribution Cost': The resolved unit distribution cost.
+            - 'Total Distribution Cost': The calculated total distribution cost as a Decimal.
+
+    Raises:
+        ValueError: If distribution cost configurations are missing for active combinations.
+    """
+
+    if volume_df.empty:
+        result = volume_df.copy()
+        result["Distribution Cost"] = pd.Series(dtype=object)
+        result["Total Distribution Cost"] = pd.Series(dtype=object)
+        return result
+
+    vol_clean = volume_df.copy()
+    vol_clean["Ship to ID"] = vol_clean["Ship to ID"].astype(str).str.strip()
+
+    cost_clean = dist_cost_df.copy()
+    cost_clean["Ship to ID"] = cost_clean["Ship to ID"].astype(str).str.strip()
+
+    merged = pd.merge(
+        vol_clean,
+        cost_clean[["Ship to ID", "Distribution Cost"]],
+        on=["Ship to ID"],
+        how="left",
+    )
+
+    missing_costs = merged["Distribution Cost"].isna()
+    if missing_costs.any():
+        gaps = (
+            merged[missing_costs][["Ship to ID"]]
+            .drop_duplicates()
+            .to_dict("records")
+        )
+        raise ValueError(
+            f"Missing distribution costs for Ship to destinations: {gaps}"
+        )
+
+    merged["Total Distribution Cost"] = merged["Volume"] * merged["Distribution Cost"]
+
+    return merged
+

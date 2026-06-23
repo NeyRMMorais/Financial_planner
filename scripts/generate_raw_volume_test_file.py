@@ -13,6 +13,7 @@ OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_volume_input.csv"
 PRICE_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_price_input.csv"
 COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_cost_input.csv"
 VAR_COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_variable_cost_input.csv"
+DIST_COST_OUTPUT_PATH = PROJECT_ROOT / "data" / "raw" / "mock_distribution_cost_input.csv"
 ROW_COUNT = 3_000
 TARGET_VOLUME_TONS = Decimal("77000.000")
 
@@ -280,12 +281,64 @@ def write_raw_variable_cost_test_file() -> Path:
     return VAR_COST_OUTPUT_PATH
 
 
+def get_base_distribution_cost(ship_to_id: str) -> Decimal:
+    """Compute a deterministic mock unit distribution cost per ton based on destination."""
+    # Deterministic mapping based on some region logic
+    base_map = {
+        "SHIP-001-NL": Decimal("12.50"),
+        "SHIP-001-BE": Decimal("14.00"),
+        "SHIP-014-DE": Decimal("18.20"),
+        "SHIP-014-PL": Decimal("22.10"),
+        "SHIP-027-FR": Decimal("25.00"),
+        "SHIP-027-BE": Decimal("16.50"),
+        "SHIP-038-LT": Decimal("30.00"),
+        "SHIP-038-EE": Decimal("32.50"),
+        "SHIP-052-ES": Decimal("28.00"),
+        "SHIP-052-PT": Decimal("26.40"),
+        "SHIP-073-SE": Decimal("19.80"),
+        "SHIP-073-DK": Decimal("17.20"),
+    }
+    return base_map.get(ship_to_id, Decimal("20.00"))
+
+
+def generate_distribution_cost_rows() -> list[dict[str, str]]:
+    """Build deterministic raw distribution cost records for the planning year combinations."""
+    rows = []
+    # Generate an annual distribution cost for each Ship To
+    for _, locations in SHIP_TO_BY_CUSTOMER.items():
+        for ship_to_id, ship_to_name in locations:
+            cost = get_base_distribution_cost(ship_to_id)
+            rows.append(
+                {
+                    "Ship to": ship_to_name,
+                    "Ship to ID": ship_to_id,
+                    "Distribution Cost": f"{cost:.2f}",
+                }
+            )
+    return rows
+
+
+def write_raw_distribution_cost_test_file() -> Path:
+    """Write the raw distribution cost CSV file used as input source."""
+    DIST_COST_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    rows = generate_distribution_cost_rows()
+
+    with DIST_COST_OUTPUT_PATH.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    return DIST_COST_OUTPUT_PATH
+
+
 if __name__ == "__main__":
     vol_path = write_raw_volume_test_file()
     price_path = write_raw_price_test_file()
     cost_path = write_raw_cost_test_file()
     var_cost_path = write_raw_variable_cost_test_file()
+    dist_cost_path = write_raw_distribution_cost_test_file()
     print(f"Generated volume file: {vol_path}")
     print(f"Generated price file: {price_path}")
     print(f"Generated cost file: {cost_path}")
     print(f"Generated variable cost file: {var_cost_path}")
+    print(f"Generated distribution cost file: {dist_cost_path}")

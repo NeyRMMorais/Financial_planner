@@ -202,3 +202,91 @@ def test_calculate_variable_costs_missing_raises_error(
         calculate_variable_costs(volume_df, incomplete_costs)
 
     assert "Missing variable costs for materials" in str(excinfo.value)
+
+
+@pytest.fixture
+def dist_cost_df() -> pd.DataFrame:
+    """Fixture supplying a simple annual distribution cost dataset."""
+    records = [
+        {
+            "Ship to": "Location A",
+            "Ship to ID": "SHIP-001",
+            "Distribution Cost": Decimal("10.00"),
+        },
+        {
+            "Ship to": "Location B",
+            "Ship to ID": "SHIP-002",
+            "Distribution Cost": Decimal("25.00"),
+        },
+    ]
+    return pd.DataFrame(records)
+
+
+def test_calculate_distribution_costs_happy_path(
+    dist_cost_df: pd.DataFrame,
+) -> None:
+    """Verify standard distribution cost calculations."""
+    from src.financial_planner.calculations.costs import calculate_distribution_costs
+
+    volume_df = pd.DataFrame([
+        {
+            "Ship to ID": "SHIP-001",
+            "Volume": Decimal("100.000"),
+        },
+        {
+            "Ship to ID": "SHIP-001",
+            "Volume": Decimal("50.000"),
+        },
+        {
+            "Ship to ID": "SHIP-002",
+            "Volume": Decimal("0.000"),
+        },
+    ])
+
+    result = calculate_distribution_costs(volume_df, dist_cost_df)
+
+    assert len(result) == 3
+    assert "Distribution Cost" in result.columns
+    assert "Total Distribution Cost" in result.columns
+
+    r1 = result.iloc[0]
+    assert r1["Volume"] == Decimal("100.000")
+    assert r1["Distribution Cost"] == Decimal("10.00")
+    assert r1["Total Distribution Cost"] == Decimal("1000.00000")
+
+    r2 = result.iloc[1]
+    assert r2["Volume"] == Decimal("50.000")
+    assert r2["Distribution Cost"] == Decimal("10.00")
+    assert r2["Total Distribution Cost"] == Decimal("500.00000")
+
+    r3 = result.iloc[2]
+    assert r3["Volume"] == Decimal("0.000")
+    assert r3["Distribution Cost"] == Decimal("25.00")
+    assert r3["Total Distribution Cost"] == Decimal("0.0000")
+
+
+def test_calculate_distribution_costs_missing_raises_error() -> None:
+    """Verify missing distribution costs raise an error."""
+    from src.financial_planner.calculations.costs import calculate_distribution_costs
+
+    volume_df = pd.DataFrame([
+        {
+            "Ship to ID": "SHIP-001",
+            "Volume": Decimal("100.000"),
+        },
+    ])
+
+    incomplete_costs = pd.DataFrame(
+        [
+            {
+                "Ship to": "Location B",
+                "Ship to ID": "SHIP-002",
+                "Distribution Cost": Decimal("25.00"),
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        calculate_distribution_costs(volume_df, incomplete_costs)
+
+    assert "Missing distribution costs for Ship to destinations" in str(excinfo.value)

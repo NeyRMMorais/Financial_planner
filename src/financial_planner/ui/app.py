@@ -32,6 +32,9 @@ from src.financial_planner.data_ingestion.variable_cost_loader import (
     DEFAULT_RAW_VAR_COST_FILE,
     load_variable_cost_data,
 )
+from src.financial_planner.data_ingestion.distribution_cost_loader import (
+    load_distribution_cost_data,
+)
 from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     ValidationReport,
@@ -41,13 +44,15 @@ from src.financial_planner.data_ingestion.validation import (
     run_cost_validation,
     validate_variable_cost_completeness,
     run_variable_cost_validation,
+    validate_dist_cost_completeness,
+    run_dist_cost_validation,
 )
 from src.financial_planner.calculations.pricing import (
     PriceOverride,
     resolve_monthly_prices,
 )
 from src.financial_planner.calculations.revenue import calculate_revenue
-from src.financial_planner.calculations.costs import calculate_rm_costs, calculate_variable_costs
+from src.financial_planner.calculations.costs import calculate_rm_costs, calculate_variable_costs, calculate_distribution_costs
 
 
 st.set_page_config(
@@ -502,6 +507,53 @@ def render_var_cost_data(base_var_costs: pd.DataFrame) -> None:
     )
 
 
+def render_dist_cost_checklist(report: ValidationReport) -> None:
+    """Render a visual checklist of distribution cost data quality checks with status emojis."""
+
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("Value is missing or blank" in i.message for i in issues) else "failed"
+    values_status = "passed" if not any(i.column == "Distribution Cost" for i in issues) else "failed"
+    grain_status = "passed" if not any("Duplicate distribution cost" in i.message for i in issues) else "failed"
+
+    st.markdown("### 🔍 Distribution Cost Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing or blank cost entries.
+        - {status_emoji(values_status)} **Cost Format & Sign Check**: Ensures distribution costs are valid non-negative quantities.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Ensures exactly one cost record exists per Ship to ID.
+        """
+    )
+
+
+def render_dist_cost_data(base_dist_costs: pd.DataFrame) -> None:
+    """Render the distribution cost overview and raw dataset preview."""
+
+    st.success("Annual distribution cost data validated successfully!")
+
+    report = ValidationReport(is_valid=True, issues=[])
+    render_dist_cost_checklist(report)
+
+    st.write("### Base Annual Distribution Costs Preview (Top 100 rows)")
+    display_costs = base_dist_costs.copy()
+    display_costs["Distribution Cost"] = display_costs["Distribution Cost"].map(format_currency)
+
+    st.dataframe(
+        display_costs.head(100),
+        use_container_width=True,
+        hide_index=True,
+        column_order=["Ship to", "Ship to ID", "Distribution Cost"],
+    )
+
+
 def main() -> None:
     """Run the Streamlit app for the first planning workflow step."""
 
@@ -516,6 +568,8 @@ def main() -> None:
         st.session_state.base_costs = None
     if "base_var_costs" not in st.session_state:
         st.session_state.base_var_costs = None
+    if "base_dist_costs" not in st.session_state:
+        st.session_state.base_dist_costs = None
 
     st.title("Financial Planner - Ingestion & Adjustments")
 
@@ -579,11 +633,32 @@ def main() -> None:
         else:
             st.success("🟢 Variable Cost Ingestion Reconciled: All planned sales records have annual variable costs configured.")
 
-    tab_volume, tab_price, tab_cost, tab_var_cost, tab_revenue = st.tabs([
+    # Cross-Table Ingestion Completeness Check (Distribution Cost)
+    has_dist_cost_issues = False
+    if st.session_state.volume_data is not None and st.session_state.base_dist_costs is not None:
+        dist_cost_issues = validate_dist_cost_completeness(
+            st.session_state.volume_data, st.session_state.base_dist_costs
+        )
+        if dist_cost_issues:
+            has_dist_cost_issues = True
+            st.error("🚨 Missing Distribution Costs: Active planned volume records lack distribution costs.")
+            missing_dist_cost_records = [
+                {
+                    "Active Planned combination": issue.value,
+                    "Reconciliation Error": issue.message,
+                }
+                for issue in dist_cost_issues
+            ]
+            st.dataframe(pd.DataFrame(missing_dist_cost_records), use_container_width=True, hide_index=True)
+        else:
+            st.success("🟢 Distribution Cost Ingestion Reconciled: All planned sales records have distribution costs configured.")
+
+    tab_volume, tab_price, tab_cost, tab_var_cost, tab_dist_cost, tab_revenue = st.tabs([
         "📊 Volume Ingestion",
         "💵 Price Planning",
         "🏭 RM Cost Ingestion",
         "🏭 Variable Cost Ingestion",
+        "🚚 Distribution Cost Ingestion",
         "💰 Revenue & Cost Planning"
     ])
 
@@ -806,6 +881,61 @@ def main() -> None:
         else:
             st.info("Waiting for annual variable cost data...")
 
+    with tab_dist_cost:
+        st.subheader("Annual Distribution Cost Ingestion")
+        dc_method = st.radio(
+            "Choose how to load your planning distribution costs file:",
+            options=["Load from Server Path", "Upload CSV File"],
+            key="dist_cost_method",
+            horizontal=True,
+        )
+
+        dc_validation_error = None
+
+        if dc_method == "Load from Server Path":
+            st.markdown(
+                "Use this option to load distribution costs directly from the server's filesystem, "
+                "avoiding WebSocket transfer issues in sandboxed or forwarded environments."
+            )
+            from pathlib import Path
+            DEFAULT_RAW_DIST_COST_FILE = Path(__file__).resolve().parents[3] / "data" / "raw" / "mock_distribution_cost_input.csv"
+            dc_file_path_str = st.text_input("Server Distribution Cost File Path", value=str(DEFAULT_RAW_DIST_COST_FILE), key="dist_cost_path")
+            if st.button("Load Distribution Cost Data", key="dist_cost_load_btn"):
+                try:
+                    dc_file_path = Path(dc_file_path_str)
+                    if not dc_file_path.exists():
+                        st.error(f"File not found: {dc_file_path}")
+                    else:
+                        st.session_state.base_dist_costs = load_distribution_cost_data(dc_file_path)
+                except PlanningValidationError as error:
+                    dc_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
+        else:
+            dc_uploaded_file = st.file_uploader(
+                "Upload distribution costs input",
+                type=["csv"],
+                accept_multiple_files=False,
+                key="dist_cost_uploader",
+            )
+
+            if dc_uploaded_file is not None:
+                try:
+                    st.session_state.base_dist_costs = load_distribution_cost_data(dc_uploaded_file)
+                except PlanningValidationError as error:
+                    dc_validation_error = error.report
+                except Exception as error:
+                    st.error(str(error))
+
+        if st.session_state.base_dist_costs is not None:
+            render_dist_cost_data(st.session_state.base_dist_costs)
+        elif dc_validation_error is not None:
+            st.error("Distribution Cost validation failed with critical errors.")
+            render_dist_cost_checklist(dc_validation_error)
+            render_troubleshooting_table(dc_validation_error)
+        else:
+            st.info("Waiting for distribution cost data...")
+
     with tab_revenue:
         st.subheader("Planning Revenue & Cost Calculations")
         if (
@@ -813,9 +943,10 @@ def main() -> None:
             or st.session_state.base_prices is None
             or st.session_state.base_costs is None
             or st.session_state.base_var_costs is None
+            or st.session_state.base_dist_costs is None
         ):
             st.info(
-                "Waiting for sales volume, base pricing, RM costs, and variable costs data to be loaded..."
+                "Waiting for sales volume, base pricing, RM costs, variable costs, and distribution costs data to be loaded..."
             )
         else:
             price_issues = validate_pricing_completeness(
@@ -827,8 +958,11 @@ def main() -> None:
             var_cost_issues = validate_variable_cost_completeness(
                 st.session_state.volume_data, st.session_state.base_var_costs
             )
+            dist_cost_issues = validate_dist_cost_completeness(
+                st.session_state.volume_data, st.session_state.base_dist_costs
+            )
 
-            if price_issues or cost_issues or var_cost_issues:
+            if price_issues or cost_issues or var_cost_issues or dist_cost_issues:
                 if price_issues:
                     st.warning(
                         "🚨 Cannot calculate planning revenue: There are missing unit prices. "
@@ -843,6 +977,11 @@ def main() -> None:
                     st.warning(
                         "🚨 Cannot calculate planning costs: There are missing variable costs. "
                         "Please resolve the cost gaps in the 'Variable Cost Ingestion' tab before proceeding."
+                    )
+                if dist_cost_issues:
+                    st.warning(
+                        "🚨 Cannot calculate planning costs: There are missing distribution costs. "
+                        "Please resolve the cost gaps in the 'Distribution Cost Ingestion' tab before proceeding."
                     )
             else:
                 # 1. Resolve final monthly prices (with overrides applied)
@@ -861,8 +1000,12 @@ def main() -> None:
                         revenue_df, st.session_state.base_costs
                     )
                     # Calculate variable costs
-                    calculated_df = calculate_variable_costs(
+                    var_calc_df = calculate_variable_costs(
                         rm_calc_df, st.session_state.base_var_costs
+                    )
+                    # Calculate distribution costs
+                    calculated_df = calculate_distribution_costs(
+                        var_calc_df, st.session_state.base_dist_costs
                     )
 
                     # 3. Calculate summary metrics using Decimal math
@@ -870,6 +1013,7 @@ def main() -> None:
                     total_revenue = sum(calculated_df["Revenue"], Decimal("0.00"))
                     total_rm_cost = sum(calculated_df["Total RM Cost"], Decimal("0.00"))
                     total_var_cost = sum(calculated_df["Total Variable Cost"], Decimal("0.00"))
+                    total_dist_cost = sum(calculated_df["Total Distribution Cost"], Decimal("0.00"))
 
                     # Safeguards against division by zero
                     weighted_avg_price = (
@@ -877,25 +1021,24 @@ def main() -> None:
                         if total_volume > 0
                         else Decimal("0.00")
                     )
-                    weighted_avg_rm_cost = (
-                        total_rm_cost / total_volume
-                        if total_volume > 0
-                        else Decimal("0.00")
-                    )
-                    weighted_avg_var_cost = (
-                        total_var_cost / total_volume
+                    weighted_avg_dist_cost = (
+                        total_dist_cost / total_volume
                         if total_volume > 0
                         else Decimal("0.00")
                     )
 
                     # 4. Render summary metrics cards
-                    cols = st.columns(6)
-                    cols[0].metric("Total Volume (T)", format_decimal(total_volume))
-                    cols[1].metric("Total Revenue ($)", format_currency(total_revenue))
-                    cols[2].metric("Total RM Cost ($)", format_currency(total_rm_cost))
-                    cols[3].metric("Total Var Cost ($)", format_currency(total_var_cost))
-                    cols[4].metric("Avg RM Cost ($/T)", format_currency(weighted_avg_rm_cost))
-                    cols[5].metric("Avg Var Cost ($/T)", format_currency(weighted_avg_var_cost))
+                    st.markdown("#### Total Volume & Revenue")
+                    cols1 = st.columns(3)
+                    cols1[0].metric("Total Volume (T)", format_decimal(total_volume))
+                    cols1[1].metric("Total Revenue ($)", format_currency(total_revenue))
+                    cols1[2].metric("Avg Price ($/T)", format_currency(weighted_avg_price))
+
+                    st.markdown("#### Operational Costs")
+                    cols2 = st.columns(3)
+                    cols2[0].metric("Total RM Cost ($)", format_currency(total_rm_cost))
+                    cols2[1].metric("Total Var Cost ($)", format_currency(total_var_cost))
+                    cols2[2].metric("Total Dist Cost ($)", format_currency(total_dist_cost))
 
                     st.markdown("---")
 
@@ -911,6 +1054,8 @@ def main() -> None:
                     display_df["Total RM Cost"] = display_df["Total RM Cost"].map(format_currency)
                     display_df["Variable Cost"] = display_df["Variable Cost"].map(format_currency)
                     display_df["Total Variable Cost"] = display_df["Total Variable Cost"].map(format_currency)
+                    display_df["Distribution Cost"] = display_df["Distribution Cost"].map(format_currency)
+                    display_df["Total Distribution Cost"] = display_df["Total Distribution Cost"].map(format_currency)
 
                     st.dataframe(
                         display_df.head(100),
@@ -920,6 +1065,8 @@ def main() -> None:
                             "Material",
                             "Material ID",
                             "Plant",
+                            "Ship to",
+                            "Ship to ID",
                             "Date",
                             "Volume",
                             "Price",
@@ -928,15 +1075,17 @@ def main() -> None:
                             "Total RM Cost",
                             "Variable Cost",
                             "Total Variable Cost",
+                            "Distribution Cost",
+                            "Total Distribution Cost",
                         ],
                     )
 
                     # 6. Export functionality
                     csv = calculated_df.to_csv(index=False).encode("utf-8")
                     st.download_button(
-                        label="📥 Download Calculated Revenue & RM Cost (CSV)",
+                        label="📥 Download Calculated Revenue & Costs (CSV)",
                         data=csv,
-                        file_name="calculated_revenue_and_rm_cost_2026.csv",
+                        file_name="calculated_revenue_and_costs_2026.csv",
                         mime="text/csv",
                         key="dl_revenue_cost_btn",
                     )
