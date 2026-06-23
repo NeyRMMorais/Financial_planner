@@ -35,6 +35,12 @@ from src.financial_planner.data_ingestion.variable_cost_loader import (
 from src.financial_planner.data_ingestion.distribution_cost_loader import (
     load_distribution_cost_data,
 )
+from src.financial_planner.data_ingestion.fx_loader import (
+    DEFAULT_RAW_FX_FILE,
+    DEFAULT_RAW_PLANT_CURRENCY_FILE,
+    load_fx_data,
+    load_plant_currency_data,
+)
 from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     ValidationReport,
@@ -46,6 +52,9 @@ from src.financial_planner.data_ingestion.validation import (
     run_variable_cost_validation,
     validate_dist_cost_completeness,
     run_dist_cost_validation,
+    validate_fx_completeness,
+    run_fx_validation,
+    run_plant_currency_validation,
 )
 from src.financial_planner.calculations.pricing import (
     PriceOverride,
@@ -83,6 +92,19 @@ def format_currency(value: Decimal) -> str:
     """Format a Decimal value as a business-readable currency string."""
 
     return f"${value:,.2f}"
+
+
+def format_local_currency(val: Decimal, currency: str) -> str:
+    """Format a Decimal value dynamically based on its currency symbol."""
+    if currency in ("USD", "CAD"):
+        return f"${val:,.2f} ({currency})"
+    elif currency == "EUR":
+        return f"€{val:,.2f}"
+    elif currency == "KRW":
+        return f"₩{val:,.0f}"
+    elif currency == "CNY":
+        return f"¥{val:,.2f}"
+    return f"{val:,.2f} {currency}"
 
 
 def prepare_display_data(volume_data: pd.DataFrame) -> pd.DataFrame:
@@ -553,6 +575,86 @@ def render_dist_cost_data(base_dist_costs: pd.DataFrame) -> None:
     )
 
 
+def render_fx_checklist(report: ValidationReport) -> None:
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("cannot be blank" in i.message for i in issues) else "failed"
+    values_status = "passed" if not any("must be greater than zero" in i.message or "must be a valid positive number" in i.message for i in issues) else "failed"
+    period_status = "passed" if not any("Period must be in YYYY-MM format" in i.message for i in issues) else "failed"
+    grain_status = "passed" if not any("Duplicate FX rate found" in i.message for i in issues) else "failed"
+
+    st.markdown("### 🔍 FX Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing or blank rate entries.
+        - {status_emoji(values_status)} **Rate Format & Sign Check**: Ensures exchange rates are valid positive numbers.
+        - {status_emoji(period_status)} **Period Format Check**: Ensures period is in YYYY-MM format.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Ensures exactly one exchange rate exists per Period + Currency combination.
+        """
+    )
+
+
+def render_fx_data(fx_rates: pd.DataFrame) -> None:
+    st.success("Monthly FX rate data validated successfully!")
+    report = ValidationReport(is_valid=True, issues=[])
+    render_fx_checklist(report)
+
+    st.write("### Base Monthly FX Rates Preview (Top 100 rows)")
+    display_fx = fx_rates.copy()
+    display_fx["Date"] = display_fx["Date"].astype(str)
+    display_fx["Rate"] = display_fx["Rate"].apply(lambda r: f"{r:.4f}")
+
+    st.dataframe(
+        display_fx.head(100),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def render_plant_currency_checklist(report: ValidationReport) -> None:
+    issues = report.issues
+
+    schema_status = "passed" if not any("Missing required column" in i.message for i in issues) else "failed"
+    nulls_status = "passed" if not any("cannot be blank" in i.message for i in issues) else "failed"
+    grain_status = "passed" if not any("Duplicate Plant currency mapping" in i.message for i in issues) else "failed"
+
+    st.markdown("### 🔍 Plant Currency Mapping Ingestion Checklist")
+
+    def status_emoji(status: str) -> str:
+        if status == "passed":
+            return "🟢 **PASSED**"
+        return "🔴 **FAILED**"
+
+    st.markdown(
+        f"""
+        - {status_emoji(schema_status)} **Schema Verification**: Checks if all required columns are present.
+        - {status_emoji(nulls_status)} **Required Values Check**: Checks for missing or blank entries.
+        - {status_emoji(grain_status)} **Unique Grain Verification**: Ensures exactly one mapping exists per Plant.
+        """
+    )
+
+
+def render_plant_currency_data(plant_currency: pd.DataFrame) -> None:
+    st.success("Plant Currency mapping data validated successfully!")
+    report = ValidationReport(is_valid=True, issues=[])
+    render_plant_currency_checklist(report)
+
+    st.write("### Plant Currency Mappings Overview")
+    st.dataframe(
+        plant_currency,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def main() -> None:
     """Run the Streamlit app for the first planning workflow step."""
 
@@ -569,6 +671,10 @@ def main() -> None:
         st.session_state.base_var_costs = None
     if "base_dist_costs" not in st.session_state:
         st.session_state.base_dist_costs = None
+    if "fx_rates" not in st.session_state:
+        st.session_state.fx_rates = None
+    if "plant_currency" not in st.session_state:
+        st.session_state.plant_currency = None
 
     st.title("Financial Planner - Ingestion & Adjustments")
 
@@ -652,12 +758,39 @@ def main() -> None:
         else:
             st.success("🟢 Distribution Cost Ingestion Reconciled: All planned sales records have distribution costs configured.")
 
-    tab_volume, tab_price, tab_cost, tab_var_cost, tab_dist_cost, tab_revenue = st.tabs([
+    # Cross-Table Ingestion Completeness Check (FX & Currency Mapping)
+    has_fx_issues = False
+    if (
+        st.session_state.volume_data is not None
+        and st.session_state.fx_rates is not None
+        and st.session_state.plant_currency is not None
+    ):
+        fx_issues = validate_fx_completeness(
+            st.session_state.volume_data,
+            st.session_state.fx_rates,
+            st.session_state.plant_currency,
+        )
+        if fx_issues:
+            has_fx_issues = True
+            st.error("🚨 Missing FX Configuration: Some active planned records lack exchange rates or plant-currency mapping.")
+            missing_fx_records = [
+                {
+                    "Combination Detail": issue.value,
+                    "Reconciliation Error": issue.message,
+                }
+                for issue in fx_issues
+            ]
+            st.dataframe(pd.DataFrame(missing_fx_records), use_container_width=True, hide_index=True)
+        else:
+            st.success("🟢 FX & Currency Ingestion Reconciled: All active volume rows have complete plant mappings and period exchange rates.")
+
+    tab_volume, tab_price, tab_cost, tab_var_cost, tab_dist_cost, tab_fx, tab_revenue = st.tabs([
         "📊 Volume Ingestion",
         "💵 Price Planning",
         "🏭 RM Cost Ingestion",
         "🏭 Variable Cost Ingestion",
         "🚚 Distribution Cost Ingestion",
+        "💱 FX & Currency Ingestion",
         "💰 Revenue & Cost Planning"
     ])
 
@@ -932,8 +1065,114 @@ def main() -> None:
             st.error("Distribution Cost validation failed with critical errors.")
             render_dist_cost_checklist(dc_validation_error)
             render_troubleshooting_table(dc_validation_error)
-        else:
-            st.info("Waiting for distribution cost data...")
+    with tab_fx:
+        st.subheader("FX Rates & Plant Currency Mapping Ingestion")
+
+        col_pc, col_fx_rate = st.columns(2)
+
+        with col_pc:
+            st.markdown("#### 1. Plant Currency Mapping")
+            pc_method = st.radio(
+                "Choose how to load Plant Currency Mapping:",
+                options=["Load from Server Path", "Upload CSV File"],
+                key="pc_method",
+                horizontal=True,
+            )
+
+            pc_validation_error = None
+
+            if pc_method == "Load from Server Path":
+                pc_file_path_str = st.text_input(
+                    "Server Plant Mapping Path",
+                    value=str(DEFAULT_RAW_PLANT_CURRENCY_FILE),
+                    key="pc_path",
+                )
+                if st.button("Load Plant Mapping Data", key="pc_load_btn"):
+                    try:
+                        pc_file_path = Path(pc_file_path_str)
+                        if not pc_file_path.exists():
+                            st.error(f"File not found: {pc_file_path}")
+                        else:
+                            st.session_state.plant_currency = load_plant_currency_data(pc_file_path)
+                    except PlanningValidationError as error:
+                        pc_validation_error = error.report
+                    except Exception as error:
+                        st.error(str(error))
+            else:
+                pc_uploaded_file = st.file_uploader(
+                    "Upload Plant Currency Mapping CSV",
+                    type=["csv"],
+                    accept_multiple_files=False,
+                    key="pc_uploader",
+                )
+                if pc_uploaded_file is not None:
+                    try:
+                        st.session_state.plant_currency = load_plant_currency_data(pc_uploaded_file)
+                    except PlanningValidationError as error:
+                        pc_validation_error = error.report
+                    except Exception as error:
+                        st.error(str(error))
+
+            if st.session_state.plant_currency is not None:
+                render_plant_currency_data(st.session_state.plant_currency)
+            elif pc_validation_error is not None:
+                st.error("Plant Currency Mapping validation failed with critical errors.")
+                render_plant_currency_checklist(pc_validation_error)
+                render_troubleshooting_table(pc_validation_error)
+            else:
+                st.info("Waiting for plant currency mapping data...")
+
+        with col_fx_rate:
+            st.markdown("#### 2. FX Rates")
+            fx_method = st.radio(
+                "Choose how to load FX Rates:",
+                options=["Load from Server Path", "Upload CSV File"],
+                key="fx_method",
+                horizontal=True,
+            )
+
+            fx_validation_error = None
+
+            if fx_method == "Load from Server Path":
+                fx_file_path_str = st.text_input(
+                    "Server FX Rates Path",
+                    value=str(DEFAULT_RAW_FX_FILE),
+                    key="fx_path",
+                )
+                if st.button("Load FX Rates Data", key="fx_load_btn"):
+                    try:
+                        fx_file_path = Path(fx_file_path_str)
+                        if not fx_file_path.exists():
+                            st.error(f"File not found: {fx_file_path}")
+                        else:
+                            st.session_state.fx_rates = load_fx_data(fx_file_path)
+                    except PlanningValidationError as error:
+                        fx_validation_error = error.report
+                    except Exception as error:
+                        st.error(str(error))
+            else:
+                fx_uploaded_file = st.file_uploader(
+                    "Upload FX Rates CSV",
+                    type=["csv"],
+                    accept_multiple_files=False,
+                    key="fx_uploader",
+                )
+                if fx_uploaded_file is not None:
+                    try:
+                        st.session_state.fx_rates = load_fx_data(fx_uploaded_file)
+                    except PlanningValidationError as error:
+                        fx_validation_error = error.report
+                    except Exception as error:
+                        st.error(str(error))
+
+            if st.session_state.fx_rates is not None:
+                render_fx_data(st.session_state.fx_rates)
+            elif fx_validation_error is not None:
+                st.error("FX Rates validation failed with critical errors.")
+                render_fx_checklist(fx_validation_error)
+                render_troubleshooting_table(fx_validation_error)
+            else:
+                st.info("Waiting for FX rates data...")
 
     with tab_revenue:
         st.subheader("Planning Revenue & Cost Calculations")
@@ -943,9 +1182,12 @@ def main() -> None:
             or st.session_state.base_costs is None
             or st.session_state.base_var_costs is None
             or st.session_state.base_dist_costs is None
+            or st.session_state.plant_currency is None
+            or st.session_state.fx_rates is None
         ):
             st.info(
-                "Waiting for sales volume, base pricing, RM costs, variable costs, and distribution costs data to be loaded..."
+                "Waiting for sales volume, base pricing, RM costs, variable costs, distribution costs, "
+                "plant mappings, and FX rates data to be loaded..."
             )
         else:
             price_issues = validate_pricing_completeness(
@@ -960,8 +1202,13 @@ def main() -> None:
             dist_cost_issues = validate_dist_cost_completeness(
                 st.session_state.volume_data, st.session_state.base_dist_costs
             )
+            fx_issues = validate_fx_completeness(
+                st.session_state.volume_data,
+                st.session_state.fx_rates,
+                st.session_state.plant_currency,
+            )
 
-            if price_issues or cost_issues or var_cost_issues or dist_cost_issues:
+            if price_issues or cost_issues or var_cost_issues or dist_cost_issues or fx_issues:
                 if price_issues:
                     st.warning(
                         "🚨 Cannot calculate planning revenue: There are missing unit prices. "
@@ -982,6 +1229,11 @@ def main() -> None:
                         "🚨 Cannot calculate planning costs: There are missing distribution costs. "
                         "Please resolve the cost gaps in the 'Distribution Cost Ingestion' tab before proceeding."
                     )
+                if fx_issues:
+                    st.warning(
+                        "🚨 Cannot calculate planning costs: There are missing FX rates or plant mappings. "
+                        "Please resolve the configuration gaps in the 'FX & Currency Ingestion' tab before proceeding."
+                    )
             else:
                 # 1. Resolve final monthly prices (with overrides applied)
                 resolved_prices = resolve_monthly_prices(
@@ -996,27 +1248,73 @@ def main() -> None:
                         base_costs=st.session_state.base_costs,
                         base_var_costs=st.session_state.base_var_costs,
                         base_dist_costs=st.session_state.base_dist_costs,
+                        plant_currency_mapping_df=st.session_state.plant_currency,
+                        fx_rates_df=st.session_state.fx_rates,
                     )
 
                     # 3. Generate summary metrics
                     metrics = generate_summary_metrics(calculated_df)
 
-                    # 4. Render summary metrics cards
-                    st.markdown("#### Total Volume, Revenue & Margin")
+                    # Currency Display Selector
+                    st.markdown("### 💱 Currency Mode")
+                    currency_mode = st.radio(
+                        "Select Display Currency for planning detailed table:",
+                        options=["USD Mode", "Local Currency (LC) Mode"],
+                        key="currency_mode_selector",
+                        horizontal=True,
+                    )
+
+                    # 4. Render summary metrics cards (always in USD)
+                    st.markdown("#### Total Volume, Revenue & Margin (USD)")
                     cols1 = st.columns(4)
                     cols1[0].metric("Total Volume (T)", format_decimal(metrics["total_volume"]))
-                    cols1[1].metric("Total Revenue ($)", format_currency(metrics["total_revenue"]))
-                    cols1[2].metric("Total VCM ($)", format_currency(metrics["total_vcm"]))
-                    cols1[3].metric("Avg VCM ($/T)", format_currency(metrics["weighted_avg_vcm"]))
+                    cols1[1].metric("Total Revenue ($ USD)", format_currency(metrics["total_revenue_usd"]))
+                    cols1[2].metric("Total VCM ($ USD)", format_currency(metrics["total_vcm_usd"]))
+                    cols1[3].metric("Avg VCM ($/T USD)", format_currency(metrics["weighted_avg_vcm_usd"]))
 
-                    st.markdown("#### Operational Costs")
+                    st.markdown("#### Operational Costs (USD)")
                     cols2 = st.columns(4)
-                    cols2[0].metric("Total RM Cost ($)", format_currency(metrics["total_rm_cost"]))
-                    cols2[1].metric("Total Var Cost ($)", format_currency(metrics["total_var_cost"]))
-                    cols2[2].metric("Total Dist Cost ($)", format_currency(metrics["total_dist_cost"]))
-                    cols2[3].metric("Avg Price ($/T)", format_currency(metrics["weighted_avg_price"]))
+                    cols2[0].metric("Total RM Cost ($ USD)", format_currency(metrics["total_rm_cost_usd"]))
+                    cols2[1].metric("Total Var Cost ($ USD)", format_currency(metrics["total_var_cost_usd"]))
+                    cols2[2].metric("Total Dist Cost ($ USD)", format_currency(metrics["total_dist_cost_usd"]))
+                    cols2[3].metric("Avg Price ($/T USD)", format_currency(metrics["weighted_avg_price_usd"]))
 
                     st.markdown("---")
+
+                    # Currency breakdown table if LC selected
+                    if currency_mode == "Local Currency (LC) Mode":
+                        st.markdown("#### 💱 Currency Breakdown of Totals (Local Currency)")
+                        
+                        # Group by Plant_Currency and sum the local currency columns
+                        breakdown_df = calculated_df.groupby("Plant_Currency").agg({
+                            "Volume": "sum",
+                            "Revenue_LC": "sum",
+                            "Total_RM_Cost_LC": "sum",
+                            "Total_Variable_Cost_LC": "sum",
+                            "Total_Distribution_Cost_LC": "sum",
+                            "VCM_LC": "sum"
+                        }).reset_index()
+                        
+                        # Format the breakdown values
+                        formatted_breakdown = []
+                        for _, row in breakdown_df.iterrows():
+                            curr = row["Plant_Currency"]
+                            formatted_breakdown.append({
+                                "Currency": curr,
+                                "Total Volume (T)": format_decimal(row["Volume"]),
+                                "Total Revenue (LC)": format_local_currency(row["Revenue_LC"], curr),
+                                "Total RM Cost (LC)": format_local_currency(row["Total_RM_Cost_LC"], curr),
+                                "Total Var Cost (LC)": format_local_currency(row["Total_Variable_Cost_LC"], curr),
+                                "Total Dist Cost (LC)": format_local_currency(row["Total_Distribution_Cost_LC"], curr),
+                                "Total VCM (LC)": format_local_currency(row["VCM_LC"], curr),
+                            })
+                        
+                        st.dataframe(
+                            pd.DataFrame(formatted_breakdown),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        st.markdown("---")
 
                     # 5. Display preview of the calculated dataset
                     st.write("### Calculated Planning Dataset Preview (Top 100 rows)")
@@ -1024,22 +1322,20 @@ def main() -> None:
                     display_df = calculated_df.copy()
                     display_df["Date"] = display_df["Date"].astype(str)
                     display_df["Volume"] = display_df["Volume"].map(format_decimal)
-                    display_df["Price"] = display_df["Price"].map(format_currency)
-                    display_df["Revenue"] = display_df["Revenue"].map(format_currency)
-                    display_df["Cost"] = display_df["Cost"].map(format_currency)
-                    display_df["Total RM Cost"] = display_df["Total RM Cost"].map(format_currency)
-                    display_df["Variable Cost"] = display_df["Variable Cost"].map(format_currency)
-                    display_df["Total Variable Cost"] = display_df["Total Variable Cost"].map(format_currency)
-                    display_df["Distribution Cost"] = display_df["Distribution Cost"].map(format_currency)
-                    display_df["Total Distribution Cost"] = display_df["Total Distribution Cost"].map(format_currency)
-                    display_df["VCM"] = display_df["VCM"].map(format_currency)
-                    display_df["Unit VCM"] = display_df["Unit VCM"].map(format_currency)
 
-                    st.dataframe(
-                        display_df.head(100),
-                        use_container_width=True,
-                        hide_index=True,
-                        column_order=[
+                    if currency_mode == "USD Mode":
+                        display_df["Price"] = display_df["Price_USD"].map(format_currency)
+                        display_df["Revenue"] = display_df["Revenue_USD"].map(format_currency)
+                        display_df["Cost"] = display_df["RM_Cost_USD"].map(format_currency)
+                        display_df["Total RM Cost"] = display_df["Total_RM_Cost_USD"].map(format_currency)
+                        display_df["Variable Cost"] = display_df["Var_Cost_USD"].map(format_currency)
+                        display_df["Total Variable Cost"] = display_df["Total_Var_Cost_USD"].map(format_currency)
+                        display_df["Distribution Cost"] = display_df["Dist_Cost_USD"].map(format_currency)
+                        display_df["Total Distribution Cost"] = display_df["Total_Dist_Cost_USD"].map(format_currency)
+                        display_df["Unit VCM"] = display_df["Unit_VCM_USD"].map(format_currency)
+                        display_df["VCM"] = display_df["VCM_USD"].map(format_currency)
+                        
+                        col_order = [
                             "Material",
                             "Material ID",
                             "Plant",
@@ -1057,7 +1353,45 @@ def main() -> None:
                             "Total Distribution Cost",
                             "Unit VCM",
                             "VCM",
-                        ],
+                        ]
+                    else:
+                        display_df["Price"] = display_df.apply(lambda row: format_local_currency(row["Price_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Revenue"] = display_df.apply(lambda row: format_local_currency(row["Revenue_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Cost"] = display_df.apply(lambda row: format_local_currency(row["RM_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Total RM Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_RM_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Variable Cost"] = display_df.apply(lambda row: format_local_currency(row["Var_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Total Variable Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Var_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Distribution Cost"] = display_df.apply(lambda row: format_local_currency(row["Dist_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Total Distribution Cost"] = display_df.apply(lambda row: format_local_currency(row["Total_Dist_Cost_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["Unit VCM"] = display_df.apply(lambda row: format_local_currency(row["Unit_VCM_LC"], row["Plant_Currency"]), axis=1)
+                        display_df["VCM"] = display_df.apply(lambda row: format_local_currency(row["VCM_LC"], row["Plant_Currency"]), axis=1)
+
+                        col_order = [
+                            "Material",
+                            "Material ID",
+                            "Plant",
+                            "Plant_Currency",
+                            "Ship to",
+                            "Ship to ID",
+                            "Date",
+                            "Volume",
+                            "Price",
+                            "Revenue",
+                            "Cost",
+                            "Total RM Cost",
+                            "Variable Cost",
+                            "Total Variable Cost",
+                            "Distribution Cost",
+                            "Total Distribution Cost",
+                            "Unit VCM",
+                            "VCM",
+                        ]
+
+                    st.dataframe(
+                        display_df.head(100),
+                        use_container_width=True,
+                        hide_index=True,
+                        column_order=col_order,
                     )
 
                     # 6. Export functionality

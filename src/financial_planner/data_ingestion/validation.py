@@ -11,6 +11,8 @@ from decimal import Decimal
 import re
 from typing import Any, Literal
 
+import pandas as pd
+
 PLANNING_VOLUME_COLUMNS: list[str] = [
     "Material",
     "Material ID",
@@ -47,6 +49,17 @@ PLANNING_DIST_COST_COLUMNS: list[str] = [
     "Ship to",
     "Ship to ID",
     "Distribution Cost",
+]
+
+PLANNING_FX_COLUMNS: list[str] = [
+    "Period",
+    "Currency",
+    "Rate",
+]
+
+PLANNING_PLANT_CURRENCY_COLUMNS: list[str] = [
+    "Plant",
+    "Currency",
 ]
 
 
@@ -1159,6 +1172,279 @@ def validate_dist_cost_completeness(
                     row_index=None,
                     value=f"Ship to ID: {ship_id}",
                     message="Missing distribution cost for Ship to",
+                    severity="error",
+                )
+            )
+
+    return issues
+
+
+def validate_fx_schema(df: Any) -> list[ValidationIssue]:
+    issues = []
+    missing_columns = [col for col in PLANNING_FX_COLUMNS if col not in df.columns]
+    for col in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=col,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{col}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_fx_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    issues = []
+    for col in PLANNING_FX_COLUMNS:
+        if col not in df.columns:
+            continue
+        for idx, val in df[col].items():
+            if pd.isna(val) or str(val).strip() == "":
+                issues.append(
+                    ValidationIssue(
+                        column=col,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message=f"Value in '{col}' cannot be blank",
+                        severity="error",
+                    )
+                )
+    return issues
+
+
+def validate_fx_values(df: Any) -> list[ValidationIssue]:
+    issues = []
+    for idx, row in df.iterrows():
+        rate_val = row.get("Rate")
+        if pd.isna(rate_val) or str(rate_val).strip() == "":
+            continue
+        try:
+            val = Decimal(str(rate_val).strip())
+            if val <= Decimal("0"):
+                issues.append(
+                    ValidationIssue(
+                        column="Rate",
+                        row_index=int(idx) + 1,
+                        value=rate_val,
+                        message="FX rate must be greater than zero",
+                        severity="error",
+                    )
+                )
+        except Exception:
+            issues.append(
+                ValidationIssue(
+                    column="Rate",
+                    row_index=int(idx) + 1,
+                    value=rate_val,
+                    message="FX rate must be a valid positive number",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_fx_periods(df: Any) -> list[ValidationIssue]:
+    issues = []
+    period_pattern = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+    for idx, row in df.iterrows():
+        period = row.get("Period")
+        if pd.isna(period) or str(period).strip() == "":
+            continue
+        period_str = str(period).strip()
+        if not period_pattern.match(period_str):
+            issues.append(
+                ValidationIssue(
+                    column="Period",
+                    row_index=int(idx) + 1,
+                    value=period,
+                    message="Period must be in YYYY-MM format",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def validate_fx_uniqueness(df: Any) -> list[ValidationIssue]:
+    issues = []
+    required_grain = ["Period", "Currency"]
+    for col in required_grain:
+        if col not in df.columns:
+            return issues
+    temp_df = df[required_grain].copy()
+    for col in required_grain:
+        temp_df[col] = temp_df[col].astype(str).str.strip()
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for keys, group in grouped:
+            period, currency = keys
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Currency",
+                    row_index=None,
+                    value=f"Period: {period}, Currency: {currency}",
+                    message=f"Duplicate FX rate found for Currency across rows {row_indices}",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def run_fx_validation(df: Any) -> ValidationReport:
+    issues = []
+    schema_issues = validate_fx_schema(df)
+    issues.extend(schema_issues)
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+    issues.extend(validate_fx_nulls_and_empty(df))
+    issues.extend(validate_fx_values(df))
+    issues.extend(validate_fx_periods(df))
+    issues.extend(validate_fx_uniqueness(df))
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_plant_currency_schema(df: Any) -> list[ValidationIssue]:
+    issues = []
+    missing_columns = [col for col in PLANNING_PLANT_CURRENCY_COLUMNS if col not in df.columns]
+    for col in missing_columns:
+        issues.append(
+            ValidationIssue(
+                column=col,
+                row_index=None,
+                value=None,
+                message=f"Missing required column: '{col}'",
+                severity="error",
+            )
+        )
+    return issues
+
+
+def validate_plant_currency_nulls_and_empty(df: Any) -> list[ValidationIssue]:
+    issues = []
+    for col in PLANNING_PLANT_CURRENCY_COLUMNS:
+        if col not in df.columns:
+            continue
+        for idx, val in df[col].items():
+            if pd.isna(val) or str(val).strip() == "":
+                issues.append(
+                    ValidationIssue(
+                        column=col,
+                        row_index=int(idx) + 1,
+                        value=val,
+                        message=f"Value in '{col}' cannot be blank",
+                        severity="error",
+                    )
+                )
+    return issues
+
+
+def validate_plant_currency_uniqueness(df: Any) -> list[ValidationIssue]:
+    issues = []
+    required_grain = ["Plant"]
+    if "Plant" not in df.columns:
+        return issues
+    temp_df = df[required_grain].copy()
+    temp_df["Plant"] = temp_df["Plant"].astype(str).str.strip()
+    duplicate_mask = temp_df.duplicated(subset=required_grain, keep=False)
+    if duplicate_mask.any():
+        grouped = temp_df[duplicate_mask].groupby(required_grain)
+        for plant, group in grouped:
+            plant_name = plant[0] if isinstance(plant, tuple) else plant
+            row_indices = [int(i) + 1 for i in group.index]
+            issues.append(
+                ValidationIssue(
+                    column="Plant",
+                    row_index=None,
+                    value=f"Plant: {plant_name}",
+                    message=f"Duplicate Plant currency mapping found across rows {row_indices}",
+                    severity="error",
+                )
+            )
+    return issues
+
+
+def run_plant_currency_validation(df: Any) -> ValidationReport:
+    issues = []
+    schema_issues = validate_plant_currency_schema(df)
+    issues.extend(schema_issues)
+    if schema_issues:
+        return ValidationReport(is_valid=False, issues=issues)
+    issues.extend(validate_plant_currency_nulls_and_empty(df))
+    issues.extend(validate_plant_currency_uniqueness(df))
+    has_errors = any(issue.severity == "error" for issue in issues)
+    return ValidationReport(is_valid=not has_errors, issues=issues)
+
+
+def validate_fx_completeness(
+    volume_df: Any, fx_df: Any, plant_currency_df: Any
+) -> list[ValidationIssue]:
+    issues = []
+    # Check column existence first
+    if "Plant" not in volume_df.columns or "Date" not in volume_df.columns:
+        return issues
+    if "Plant" not in plant_currency_df.columns or "Currency" not in plant_currency_df.columns:
+        return issues
+    if "Period" not in fx_df.columns or "Currency" not in fx_df.columns:
+        return issues
+
+    # Map Plant to Currency for fast lookup
+    plant_to_curr = {
+        str(row["Plant"]).strip(): str(row["Currency"]).strip()
+        for _, row in plant_currency_df.iterrows()
+    }
+    
+    # Set of existing FX combinations (Period, Currency)
+    fx_keys = set(
+        zip(
+            fx_df["Period"].astype(str).str.strip(),
+            fx_df["Currency"].astype(str).str.strip(),
+        )
+    )
+
+    # Check for each volume row
+    for _, row in volume_df.iterrows():
+        plant = str(row["Plant"]).strip()
+        date_val = str(row["Date"]).strip()
+
+        # 1. Check if Plant exists in Mapping
+        if plant not in plant_to_curr:
+            issues.append(
+                ValidationIssue(
+                    column="Plant",
+                    row_index=None,
+                    value=plant,
+                    message=f"Plant '{plant}' has no currency mapping",
+                    severity="error",
+                )
+            )
+            continue
+
+        lc = plant_to_curr[plant]
+
+        # 2. Check if FX rate exists for LC and Period
+        if lc != "USD" and (date_val, lc) not in fx_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Rate",
+                    row_index=None,
+                    value=f"Period: {date_val}, Currency: {lc}",
+                    message="Missing FX rate for plant's local currency",
+                    severity="error",
+                )
+            )
+
+        # 3. Check if FX rate exists for EUR and Period (since RM and variable costs are in EUR)
+        if (date_val, "EUR") not in fx_keys:
+            issues.append(
+                ValidationIssue(
+                    column="Rate",
+                    row_index=None,
+                    value=f"Period: {date_val}, Currency: EUR",
+                    message="Missing EUR exchange rate required for RM and Variable cost conversions",
                     severity="error",
                 )
             )
