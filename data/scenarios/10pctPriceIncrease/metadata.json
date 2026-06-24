@@ -1,9 +1,0 @@
-{
-  "name": "10pctPriceIncrease",
-  "created_at": "2026-06-23T22:03:25.027701",
-  "base_scenario": "Baseline",
-  "description": "",
-  "change_log": [
-    "**Base Prices**: 60 values updated/modified."
-  ]
-}
