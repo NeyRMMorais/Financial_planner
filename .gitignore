@@ -9,3 +9,4 @@ dist/
 .DS_Store
 data/scenarios/*/
 !data/scenarios/Baseline/
+financial_planner_codebase.zip
