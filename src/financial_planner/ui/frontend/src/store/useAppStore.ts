@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
 export interface Scenario {
   name: string;
@@ -10,9 +10,9 @@ export interface Scenario {
 }
 
 export interface Override {
-  'Material ID': string;
-  'Sold to ID': string;
-  'Ship to ID': string;
+  "Material ID": string;
+  "Sold to ID": string;
+  "Ship to ID": string;
   Date: string;
   Price: number;
 }
@@ -47,21 +47,21 @@ export interface PlantVariance {
   Plant: string;
   Volume_A: number;
   Volume_B: number;
-  'Volume Delta': number;
+  "Volume Delta": number;
   VCM_USD_A: number;
   VCM_USD_B: number;
-  'VCM Delta': number;
+  "VCM Delta": number;
 }
 
 export interface MaterialVariance {
   Material: string;
-  'Material ID': string;
+  "Material ID": string;
   Volume_A: number;
   Volume_B: number;
-  'Volume Delta': number;
+  "Volume Delta": number;
   VCM_USD_A: number;
   VCM_USD_B: number;
-  'VCM Delta': number;
+  "VCM Delta": number;
 }
 
 export interface CompareResult {
@@ -72,51 +72,62 @@ export interface CompareResult {
   vcm_variance_by_material: MaterialVariance[];
 }
 
+export type FileType =
+  | "volume_data"
+  | "base_prices"
+  | "base_costs"
+  | "base_var_costs"
+  | "base_dist_costs"
+  | "fx_rates"
+  | "plant_currency";
+
+export const FILE_DEFS: { key: FileType; label: string; description: string }[] = [
+  { key: "volume_data", label: "Volume Data", description: "Monthly planning volumes (MT)" },
+  { key: "base_prices", label: "Base Prices", description: "Customer × Material pricing" },
+  { key: "base_costs", label: "Raw Material Costs", description: "Monthly plant-specific RM costs" },
+  { key: "base_var_costs", label: "Variable Costs", description: "Annual variable cost per material" },
+  { key: "base_dist_costs", label: "Distribution Costs", description: "Annual distribution cost per ship-to" },
+  { key: "fx_rates", label: "FX Rates", description: "Monthly USD exchange rates" },
+  { key: "plant_currency", label: "Plant Currency", description: "Plant → Currency mapping" },
+];
+
 interface AppState {
-  // Scenario listing
   scenarios: Scenario[];
   selectedScenario: string | null;
   selectedScenarioMeta: Scenario | null;
-  
-  // Data previews for loaded scenario
-  activePreviewTab: string; // "volume_data" | "base_prices" | "base_costs" | ...
-  activeResultsTab: string; // "revenue" | "rm_costs" | "var_costs" | "dist_costs" | "vcm"
+
+  activePreviewTab: string;
+  activeResultsTab: "revenue" | "rm_costs" | "var_costs" | "dist_costs" | "vcm";
   previewData: Record<string, any[]>;
   overrides: Override[];
-  
-  // Calculations
+
   calculatedMetrics: SummaryMetrics | null;
   calculatedPreview: any[];
-  currencyMode: 'USD' | 'LC';
+  currencyMode: "USD" | "LC";
   calculationError: string | null;
-  
-  // Loading states
+
   loadingScenarios: boolean;
   loadingData: boolean;
   loadingCalculation: boolean;
-  
-  // Scenario Comparison
+
   compareScenarioA: string;
   compareScenarioB: string;
   compareResult: CompareResult | null;
   loadingCompare: boolean;
   compareError: string | null;
 
-  // Actions
   fetchScenarios: () => Promise<void>;
   selectScenario: (name: string) => Promise<void>;
   createScenario: (name: string, baseScenario: string | null, description: string) => Promise<void>;
   fetchScenarioData: (name: string, fileType: string) => Promise<void>;
-  saveScenario: () => Promise<void>;
   uploadScenarioFile: (fileType: string, file: File) => Promise<void>;
   addOverride: (override: Override) => Promise<void>;
   removeOverride: (index: number) => Promise<void>;
-  clearAllOverrides: () => Promise<void>;
   calculateScenario: () => Promise<void>;
   runComparison: () => Promise<void>;
-  setCurrencyMode: (mode: 'USD' | 'LC') => void;
+  setCurrencyMode: (mode: "USD" | "LC") => void;
   setActivePreviewTab: (tab: string) => void;
-  setActiveResultsTab: (tab: string) => void;
+  setActiveResultsTab: (tab: AppState["activeResultsTab"]) => void;
   setCompareScenarioA: (name: string) => void;
   setCompareScenarioB: (name: string) => void;
 }
@@ -125,23 +136,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   scenarios: [],
   selectedScenario: null,
   selectedScenarioMeta: null,
-  
-  activePreviewTab: 'volume_data',
-  activeResultsTab: 'revenue',
+
+  activePreviewTab: "volume_data",
+  activeResultsTab: "revenue",
   previewData: {},
   overrides: [],
-  
+
   calculatedMetrics: null,
   calculatedPreview: [],
-  currencyMode: 'USD',
+  currencyMode: "USD",
   calculationError: null,
-  
+
   loadingScenarios: false,
   loadingData: false,
   loadingCalculation: false,
-  
-  compareScenarioA: '',
-  compareScenarioB: '',
+
+  compareScenarioA: "",
+  compareScenarioB: "",
   compareResult: null,
   loadingCompare: false,
   compareError: null,
@@ -149,17 +160,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchScenarios: async () => {
     set({ loadingScenarios: true });
     try {
-      const res = await fetch('/api/scenarios');
-      if (!res.ok) throw new Error('Failed to load scenarios');
+      const res = await fetch("/api/scenarios");
+      if (!res.ok) throw new Error("Failed to load scenarios");
       const data = await res.json();
       set({ scenarios: data });
-      
-      // Select baseline by default if nothing is selected
       if (data.length > 0 && !get().selectedScenario) {
-        const baseline = data.find((s: any) => s.name === 'Baseline') || data[0];
+        const baseline = data.find((s: Scenario) => s.name === "Baseline") || data[0];
         get().selectScenario(baseline.name);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
     } finally {
       set({ loadingScenarios: false });
@@ -169,21 +178,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectScenario: async (name: string) => {
     set({ selectedScenario: name, loadingData: true, calculationError: null });
     try {
-      // 1. Fetch metadata
       const metaRes = await fetch(`/api/scenarios/${name}/metadata`);
-      if (!metaRes.ok) throw new Error('Failed to fetch metadata');
+      if (!metaRes.ok) throw new Error("Failed to fetch metadata");
       const meta = await metaRes.json();
-      
       set({ selectedScenarioMeta: meta });
 
-      // 2. Fetch only the active preview tab data and price overrides on load
       const activeTab = get().activePreviewTab;
       await Promise.all([
         get().fetchScenarioData(name, activeTab),
-        get().fetchScenarioData(name, 'price_overrides')
+        get().fetchScenarioData(name, "price_overrides"),
       ]);
-      
-      // 4. Run calculation
       await get().calculateScenario();
     } catch (err: any) {
       set({ calculationError: err.message });
@@ -193,124 +197,82 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createScenario: async (name, baseScenario, description) => {
-    try {
-      const res = await fetch('/api/scenarios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, base_scenario: baseScenario, description }),
-      });
-      if (!res.ok) {
-        const errorDetail = await res.json();
-        throw new Error(errorDetail.detail || 'Failed to create scenario');
-      }
-      
-      await get().fetchScenarios();
-      await get().selectScenario(name);
-    } catch (err: any) {
-      alert(err.message);
-      throw err;
+    const res = await fetch("/api/scenarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, base_scenario: baseScenario, description }),
+    });
+    if (!res.ok) {
+      const errorDetail = await res.json().catch(() => ({}));
+      throw new Error(errorDetail.detail || "Failed to create scenario");
     }
+    await get().fetchScenarios();
+    await get().selectScenario(name);
   },
 
-  fetchScenarioData: async (name: string, fileType: string) => {
+  fetchScenarioData: async (name, fileType) => {
     try {
       const res = await fetch(`/api/scenarios/${name}/data/${fileType}`);
       if (!res.ok) throw new Error(`Failed to load ${fileType}`);
       const fileData = await res.json();
-      
-      if (fileType === 'price_overrides') {
+      if (fileType === "price_overrides") {
         set({ overrides: fileData });
       } else {
-        set((state) => ({
-          previewData: { ...state.previewData, [fileType]: fileData }
-        }));
+        set((state) => ({ previewData: { ...state.previewData, [fileType]: fileData } }));
       }
     } catch (err) {
       console.error(err);
     }
   },
 
-  saveScenario: async () => {
-    const name = get().selectedScenario;
-    if (!name) return;
-    try {
-      const res = await fetch(`/api/scenarios/${name}/save`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to save scenario');
-      
-      // Reload metadata to update change log
-      const metaRes = await fetch(`/api/scenarios/${name}/metadata`);
-      const meta = await metaRes.json();
-      set({ selectedScenarioMeta: meta });
-    } catch (err: any) {
-      alert(err.message);
-    }
-  },
-
-  uploadScenarioFile: async (fileType: string, file: File) => {
+  uploadScenarioFile: async (fileType, file) => {
     const name = get().selectedScenario;
     if (!name) return;
     set({ loadingData: true, calculationError: null });
-    
     const formData = new FormData();
-    formData.append('file', file);
-
+    formData.append("file", file);
     try {
       const res = await fetch(`/api/scenarios/${name}/upload/${fileType}`, {
-        method: 'POST',
+        method: "POST",
         body: formData,
       });
-      
       if (!res.ok) {
-        const errorDetail = await res.json();
-        throw new Error(errorDetail.detail || 'Upload failed');
+        const errorDetail = await res.json().catch(() => ({}));
+        throw new Error(errorDetail.detail || "Upload failed");
       }
-
-      // Reload files & calculation
       await get().fetchScenarioData(name, fileType);
       await get().calculateScenario();
-      
-      // Reload metadata (to fetch updated change log)
       const metaRes = await fetch(`/api/scenarios/${name}/metadata`);
       const meta = await metaRes.json();
       set({ selectedScenarioMeta: meta });
     } catch (err: any) {
       set({ calculationError: err.message });
-      alert(err.message);
     } finally {
       set({ loadingData: false });
     }
   },
 
-  addOverride: async (override: Override) => {
+  addOverride: async (override) => {
     const name = get().selectedScenario;
     if (!name) return;
-    
-    // Check if duplicate override exists (matching Material, Sold-to, Ship-to, and Date)
     const existingIdx = get().overrides.findIndex(
       (o) =>
-        o['Material ID'] === override['Material ID'] &&
-        o['Sold to ID'] === override['Sold to ID'] &&
-        o['Ship to ID'] === override['Ship to ID'] &&
-        o.Date === override.Date
+        o["Material ID"] === override["Material ID"] &&
+        o["Sold to ID"] === override["Sold to ID"] &&
+        o["Ship to ID"] === override["Ship to ID"] &&
+        o.Date === override.Date,
     );
-
-    let updatedOverrides = [...get().overrides];
-    if (existingIdx >= 0) {
-      updatedOverrides[existingIdx] = override;
-    } else {
-      updatedOverrides.push(override);
-    }
-
-    set({ overrides: updatedOverrides, loadingCalculation: true });
-
+    const updated = [...get().overrides];
+    if (existingIdx >= 0) updated[existingIdx] = override;
+    else updated.push(override);
+    set({ overrides: updated, loadingCalculation: true });
     try {
       const res = await fetch(`/api/scenarios/${name}/overrides`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedOverrides),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
       });
-      if (!res.ok) throw new Error('Failed to update overrides');
-
+      if (!res.ok) throw new Error("Failed to update overrides");
       await get().calculateScenario();
     } catch (err: any) {
       set({ calculationError: err.message });
@@ -319,43 +281,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  removeOverride: async (index: number) => {
+  removeOverride: async (index) => {
     const name = get().selectedScenario;
     if (!name) return;
-
-    const updatedOverrides = get().overrides.filter((_, i) => i !== index);
-    set({ overrides: updatedOverrides, loadingCalculation: true });
-
+    const updated = get().overrides.filter((_, i) => i !== index);
+    set({ overrides: updated, loadingCalculation: true });
     try {
       const res = await fetch(`/api/scenarios/${name}/overrides`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedOverrides),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
       });
-      if (!res.ok) throw new Error('Failed to remove override');
-
-      await get().calculateScenario();
-    } catch (err: any) {
-      set({ calculationError: err.message });
-    } finally {
-      set({ loadingCalculation: false });
-    }
-  },
-
-  clearAllOverrides: async () => {
-    const name = get().selectedScenario;
-    if (!name) return;
-
-    set({ overrides: [], loadingCalculation: true });
-
-    try {
-      const res = await fetch(`/api/scenarios/${name}/overrides`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([]),
-      });
-      if (!res.ok) throw new Error('Failed to clear overrides');
-
+      if (!res.ok) throw new Error("Failed to remove override");
       await get().calculateScenario();
     } catch (err: any) {
       set({ calculationError: err.message });
@@ -368,19 +305,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const name = get().selectedScenario;
     if (!name) return;
     set({ loadingCalculation: true, calculationError: null });
-
     try {
-      const res = await fetch(`/api/scenarios/${name}/calculate`, { method: 'POST' });
+      const res = await fetch(`/api/scenarios/${name}/calculate`, { method: "POST" });
       if (!res.ok) {
-        const errorDetail = await res.json();
-        throw new Error(errorDetail.detail || 'Calculation pipeline failed');
+        const errorDetail = await res.json().catch(() => ({}));
+        throw new Error(errorDetail.detail || "Calculation pipeline failed");
       }
-      
       const calcResult = await res.json();
-      set({
-        calculatedMetrics: calcResult.metrics,
-        calculatedPreview: calcResult.preview,
-      });
+      set({ calculatedMetrics: calcResult.metrics, calculatedPreview: calcResult.preview });
     } catch (err: any) {
       set({ calculationError: err.message, calculatedMetrics: null, calculatedPreview: [] });
     } finally {
@@ -392,23 +324,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { compareScenarioA, compareScenarioB } = get();
     if (!compareScenarioA || !compareScenarioB) return;
     if (compareScenarioA === compareScenarioB) {
-      set({ compareError: 'Please select two different scenarios to compare.', compareResult: null });
+      set({ compareError: "Please select two different scenarios.", compareResult: null });
       return;
     }
-
     set({ loadingCompare: true, compareError: null, compareResult: null });
     try {
-      const res = await fetch('/api/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenario_a: compareScenarioA, scenario_b: compareScenarioB }),
       });
       if (!res.ok) {
-        const errorDetail = await res.json();
-        throw new Error(errorDetail.detail || 'Comparison pipeline failed');
+        const errorDetail = await res.json().catch(() => ({}));
+        throw new Error(errorDetail.detail || "Comparison pipeline failed");
       }
-      const data = await res.json();
-      set({ compareResult: data });
+      set({ compareResult: await res.json() });
     } catch (err: any) {
       set({ compareError: err.message });
     } finally {
@@ -420,9 +350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActivePreviewTab: (tab) => {
     set({ activePreviewTab: tab });
     const name = get().selectedScenario;
-    if (name) {
-      get().fetchScenarioData(name, tab);
-    }
+    if (name) get().fetchScenarioData(name, tab);
   },
   setActiveResultsTab: (tab) => set({ activeResultsTab: tab }),
   setCompareScenarioA: (name) => set({ compareScenarioA: name }),
