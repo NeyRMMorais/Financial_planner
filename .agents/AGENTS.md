@@ -35,7 +35,8 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
     *   `data_ingestion/`: File loading and data quality check engine.
     *   `calculations/`: Price, cost, margin, and scenario calculations (pure Python, pandas/polars, fully unit-testable).
     *   `export/`: File generation drivers for SAP Analytics Cloud.
-    *   `ui/`: Streamlit dashboard and UI rendering (UI files should be thin wrappers around calculations and ingestion scripts).
+    *   `ui/frontend/`: React/Vite + FluentUI 2 frontend application.
+    *   `api/`: FastAPI backend that exposes all calculations and scenario management as a REST API. The `ui/` layer must remain a thin pass-through — no business logic.
 
 ---
 
@@ -48,50 +49,51 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
     python -m pytest
     ```
 *   When implementing new features, write corresponding unit tests to verify both happy paths and edge cases (invalid fields, negative numbers, division by zero).
-*   **UI Smoke Testing:** To test the Streamlit interface programmatically, agents can use the available `chrome-devtools-plugin` to evaluate page state and run interactive UI checks, avoiding platform-specific shell wrapper scripts where possible.
+*   **UI Smoke Testing:** To test the React frontend programmatically, agents can use the available `chrome-devtools-plugin` to evaluate page state and run interactive UI checks against the running Vite dev server (`http://localhost:5173`).
 
 ---
 
 ## 📊 Current Development Phase
 
-*   **Calculation Engine (Phase 2):** Core Revenue, Pricing, and Monthly Raw Material Cost calculations have been implemented and validated. Streamlit tabs for Price Planning, Cost Ingestion, and Revenue & Cost Planning are fully active.
+*   **UI Migration (complete):** Streamlit has been fully removed. The React/Vite + FluentUI 2 frontend (`ui/frontend/`) is now the sole UI layer, backed by the FastAPI backend (`api/`).
+*   **Calculation Engine (Phase 2, complete):** Core Revenue, Pricing, and Monthly Raw Material Cost calculations have been implemented and validated. All features are exposed via FastAPI routes and consumed by the React frontend.
 *   **Roadmap:** Next we will implement UI simulation controls (Phase 3) and SAC export drivers (Phase 4).
 
 ---
 
-## 🔄 Streamlit Development & Reload Protocol
+## 🔄 Development Server Protocol
 
-Streamlit runs as a long-running process that hot-reloads the main script (e.g., `app.py`) on changes. However, Python's standard module caching (`sys.modules`) prevents nested imports from being reloaded, leading to stale code execution and `ImportError`s during active development.
+The application runs as two co-operating processes during local development:
 
-To address this, we follow this protocol:
+| Process | Command | Default Port | Purpose |
+|---|---|---|---|
+| FastAPI backend | `uvicorn src.financial_planner.api.main:app --reload --port 8000` | 8000 | REST API + scenario engine |
+| Vite dev server | `cd src/financial_planner/ui/frontend && npm run dev` | 5173 | React frontend with HMR |
 
-### 1. Automated Module-Cache Clearing
-*   **Rule:** The main UI entrypoint (`app.py`) must dynamically delete all cached modules starting with `src.financial_planner` from `sys.modules` at the very beginning of execution.
-*   **Code:**
-    ```python
-    import sys
-    for _mod in list(sys.modules.keys()):
-        if _mod.startswith("src.financial_planner"):
-            del sys.modules[_mod]
-    ```
-    This forces a clean re-import of all helper modules (e.g., calculations, loaders, validation) whenever the browser is refreshed or a user triggers a rerun.
+The Vite dev server proxies all `/api` requests to FastAPI (configured in `vite.config.ts`). Open **`http://localhost:5173`** in your browser.
 
-### 2. Orphaned Port & Process Troubleshooting (Windows)
-If port `8501` is blocked or the app displays persistent stale state that browser refresh doesn't clear, run the following troubleshooting protocol in a terminal:
+### Orphaned Port & Process Troubleshooting (Windows)
+If port `8000` or `5173` is blocked, run the following:
 
-1.  **Check for running Python processes**:
+1.  **Locate owner PID for a port** (replace `8000` with the blocked port):
     ```powershell
-    wmic process get description,processid | findstr /i "python"
+    netstat -ano | findstr 8000
     ```
-2.  **Verify port 8501 status and locate owner PID**:
-    ```powershell
-    netstat -ano | findstr 8501
-    ```
-3.  **Kill the offending Python process**:
+2.  **Kill the offending process**:
     ```powershell
     taskkill /F /PID <PID>
     ```
-4.  **Launch a clean server**:
+3.  **Re-launch the backend**:
     ```powershell
-    python -m streamlit run src/financial_planner/ui/app.py
+    uvicorn src.financial_planner.api.main:app --reload --port 8000
     ```
+
+### Production Mode
+Build the React frontend and serve everything from FastAPI on a single port:
+```powershell
+cd src/financial_planner/ui/frontend
+npm run build
+cd ../../../..
+python -m uvicorn src.financial_planner.api.main:app --host 0.0.0.0 --port 8000
+```
+Open **`http://localhost:8000`** — FastAPI will serve the compiled static assets from `ui/frontend/dist/`.

@@ -1,2 +1,2 @@
-"""Streamlit UI modules for the planning application."""
+"""UI package: React/Vite frontend (served via FastAPI static mount in production)."""
 

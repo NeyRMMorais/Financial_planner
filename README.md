@@ -15,7 +15,7 @@ In corporate finance, precision and traceability are critical. The application i
    * **Explicit Edge-Case Handling**: Zero-volume demand lines and missing inputs are explicitly checked, validated, and processed downstream to avoid divide-by-zero crashes or silent assumption failures.
 2. **Modular & Clean Architecture**:
    * Complete separation of concerns between data ingestion, calculations, user interface views, and export drivers.
-   * Business calculations and validations are written in pure Python packages to remain fully unit-testable outside of any Streamlit UI components.
+   * Business calculations and validations are written in pure Python packages to remain fully unit-testable outside of any UI components.
 3. **Structured Integration**:
    * The ingestion process enforces a strict data schema.
    * Structured, clean outputs are generated specifically for seamless upload/integration with SAP Analytics Cloud (SAC) and corporate database schemas.
@@ -49,8 +49,16 @@ Financial_planner/
 │       │   └── validation.py
 │       ├── export/          # Structured outputs formatted for SAC
 │       │   └── __init__.py
-│       └── ui/              # Streamlit dashboard and UI view layers
-│           └── app.py
+│       ├── ui/              # React/Vite + FluentUI 2 frontend
+│       │   └── frontend/
+│       │       ├── src/
+│       │       │   ├── App.tsx      # Main application shell
+│       │       │   └── store.ts     # Zustand state management
+│       │       └── package.json
+│       └── api/             # FastAPI backend (REST API + static file server)
+│           ├── main.py
+│           ├── routes.py
+│           └── schemas.py
 ├── tests/                   # PyTest test suite organized by module
 │   ├── calculations/
 │   │   ├── test_cost_calculations.py
@@ -72,8 +80,8 @@ Financial_planner/
 | Phase | Description | Status |
 | :--- | :--- | :--- |
 | **Phase 1: Ingestion & Validation** | Validate 2026 sales volumes, base customer product pricing, monthly plant-specific raw material costs, and cross-dataset grain completeness checks. | **Completed** |
-| **Phase 2: Calculation Engine** | Implement price propagation overrides, unit costs, and Decimal-safe revenue and raw material cost calculation logic. | **In Progress** (Pricing, Revenue, and RM Cost calculations completed; Other Variable Costs & Gross Margin pending) |
-| **Phase 3: Scenario & Simulations** | Add dashboard sliders to adjust price/cost trends and run what-if simulations. | *Planned* |
+| **Phase 2: Calculation Engine** | Price propagation overrides, unit costs, Decimal-safe revenue and raw material cost calculation logic. Full FastAPI API layer and React/Vite frontend. | **Completed** |
+| **Phase 3: Scenario & Simulations** | Add UI simulation controls to adjust price/cost trends and run what-if simulations. | *Planned* |
 | **Phase 4: SAC Export Driver** | Export planning results to SAC-compliant CSV/Excel formats. | *Planned* |
 
 ---
@@ -86,14 +94,32 @@ Ensure you are using Python 3.10+ and install the dependencies from the project 
 pip install -r requirements.txt
 ```
 
-### 2. Running the Streamlit UI
-To start the planning ingestion dashboard:
-```bash
-python -m streamlit run src/financial_planner/ui/app.py
-```
-The app will run locally and can be accessed at: [http://localhost:8501](http://localhost:8501)
+### 2. Running the App (Development Mode)
 
-### 3. Running Tests
+Start both servers in separate terminals:
+
+**Terminal 1 — FastAPI backend:**
+```bash
+uvicorn src.financial_planner.api.main:app --reload --port 8000
+```
+
+**Terminal 2 — React/Vite frontend:**
+```bash
+cd src/financial_planner/ui/frontend
+npm run dev
+```
+
+Open **[http://localhost:5173](http://localhost:5173)** in your browser.
+
+> The Vite dev server proxies all `/api` requests to the FastAPI backend on port 8000.
+
+### 3. Running in Production Mode
+Build and serve everything from a single FastAPI port:
+```bash
+cd src/financial_planner/ui/frontend && npm run build && cd ../../../..
+uvicorn src.financial_planner.api.main:app --host 0.0.0.0 --port 8000
+```
+Open **[http://localhost:8000](http://localhost:8000)**.
 We use `pytest` for unit test coverage. Run the tests using the module format to respect Python paths:
 ```bash
 python -m pytest
