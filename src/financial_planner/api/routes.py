@@ -878,217 +878,289 @@ def get_login_logs(email: str):
 
 @router.post("/export/bridge-pptx")
 def export_bridge_pptx(payload: PPTXExportInput):
-    """Generate and return a PowerPoint slide showing the VCM waterfall bridge."""
+    """Generate a high-fidelity PowerPoint slide with a matplotlib-rendered waterfall chart."""
     try:
+        import matplotlib
+        matplotlib.use("Agg")  # headless backend
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        from matplotlib.patches import FancyBboxPatch
+        import numpy as np
+
         from pptx import Presentation
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches, Pt, Emu
         from pptx.dml.color import RGBColor
         from pptx.enum.text import PP_ALIGN
-        from pptx.enum.shapes import MSO_SHAPE
 
-        prs = Presentation()
-        # Set to 16:9 aspect ratio
-        prs.slide_width = Inches(13.333)
-        prs.slide_height = Inches(7.5)
-        
-        # Use blank slide layout (usually layout index 6 is blank in default templates)
-        blank_layout = prs.slide_layouts[6]
-        slide = prs.slides.add_slide(blank_layout)
-        
-        # Set dark background fill
-        bg = slide.background
-        fill = bg.fill
-        fill.solid()
-        fill.fore_color.rgb = RGBColor(10, 15, 29) # #0a0f1d
-        
-        # Helper to format currency
-        def fmt_curr(val: float) -> str:
-            sign = "+" if val > 0 else ""
-            if abs(val) >= 1_000_000:
-                return f"{sign}${val/1_000_000:,.1f}M"
-            elif abs(val) >= 1_000:
-                return f"{sign}${val/1_000:,.1f}k"
-            else:
-                return f"{sign}${val:,.0f}"
-        
-        # Add Header Text Box
-        title_box = slide.shapes.add_textbox(Inches(0.75), Inches(0.5), Inches(7.0), Inches(1.2))
-        tf = title_box.text_frame
-        tf.word_wrap = True
-        
-        # Sub-header
-        p_sub = tf.paragraphs[0]
-        p_sub.text = "VCM WATERFALL BRIDGE"
-        p_sub.font.size = Pt(11)
-        p_sub.font.bold = True
-        p_sub.font.color.rgb = RGBColor(148, 163, 184) # Muted text
-        p_sub.font.name = "Arial"
-        
-        # Main Title
-        p_title = tf.add_paragraph()
-        p_title.text = "Scenario VCM Bridge (USD)"
-        p_title.font.size = Pt(24)
-        p_title.font.bold = True
-        p_title.font.color.rgb = RGBColor(255, 255, 255) # White
-        p_title.font.name = "Arial"
-        
-        # Add Filters info text box on top right
-        filter_box = slide.shapes.add_textbox(Inches(8.0), Inches(0.5), Inches(4.55), Inches(1.2))
-        tf_f = filter_box.text_frame
-        tf_f.word_wrap = True
-        p_f = tf_f.paragraphs[0]
-        p_f.alignment = PP_ALIGN.RIGHT
-        p_f.text = f"MATERIAL: {payload.material_filter}\nREGION: {payload.region_filter}"
-        p_f.font.size = Pt(11)
-        p_f.font.bold = True
-        p_f.font.color.rgb = RGBColor(148, 163, 184)
-        p_f.font.name = "Arial"
-        
-        # Chart math
+        # ── Theme colors (matching the app's dark theme CSS) ──
+        bg_color = "#0f1225"         # slide & chart background
+        card_bg = "#181c35"          # card surface
+        primary_color = "#22b8cf"    # teal/cyan for scenario totals
+        positive_color = "#10b981"   # green for positive impact
+        negative_color = "#ef4444"   # coral/red for negative impact
+        muted_color = "#8b95a8"      # muted text / axis labels
+        foreground_color = "#eef0f4" # white-ish text
+        border_color = "#2a2f4a"     # grid lines, connectors
+        connector_color = "#4a5068"  # dashed connector lines
+
+        # ── Data preparation ──
         base = float(payload.vcm_usd_a)
         vol = float(payload.volume_effect)
         price = float(payload.price_effect)
         cost = float(payload.cost_effect)
         fx = float(payload.fx_effect)
         target = float(payload.vcm_usd_b)
-        
-        running_values = [
-            0.0,
-            base,
-            base + vol,
-            base + vol + price,
-            base + vol + price + cost,
-            target
+
+        labels = [
+            payload.scenario_a,
+            "Volume\nEffect",
+            "Price\nEffect",
+            "Cost\nEffect",
+            "FX\nEffect",
+            payload.scenario_b,
         ]
-        
-        val_min = min(running_values)
-        val_max = max(running_values)
-        val_range = val_max - val_min if val_max != val_min else 1.0
-        val_padding = val_range * 0.15
-        scale_min = val_min - val_padding
-        scale_max = val_max + val_padding
-        scale_range = scale_max - scale_min
-        
-        chart_height = Inches(3.6)
-        chart_bottom = Inches(5.6)
-        
-        def getY(val: float) -> float:
-            return chart_bottom - ((val - scale_min) / scale_range) * chart_height
-            
+
+        # Running cumulative positions
+        step1 = base
+        step2 = step1 + vol
+        step3 = step2 + price
+        step4 = step3 + cost
+        step5 = step4 + fx
+
         steps = [
-            {"label": payload.scenario_a, "start": 0.0, "end": base, "change": base, "type": "base"},
-            {"label": "Volume Effect", "start": base, "end": base + vol, "change": vol, "type": "var"},
-            {"label": "Price Effect", "start": base + vol, "end": base + vol + price, "change": price, "type": "var"},
-            {"label": "Cost Effect", "start": base + vol + price, "end": base + vol + price + cost, "change": cost, "type": "var"},
-            {"label": "FX Effect", "start": base + vol + price + cost, "end": base + vol + price + cost + fx, "change": fx, "type": "var"},
-            {"label": payload.scenario_b, "start": 0.0, "end": target, "change": target, "type": "target"},
+            {"bottom": 0, "height": base, "change": base, "type": "base"},
+            {"bottom": min(step1, step2), "height": abs(vol), "change": vol, "type": "var"},
+            {"bottom": min(step2, step3), "height": abs(price), "change": price, "type": "var"},
+            {"bottom": min(step3, step4), "height": abs(cost), "change": cost, "type": "var"},
+            {"bottom": min(step4, step5), "height": abs(fx), "change": fx, "type": "var"},
+            {"bottom": 0, "height": target, "change": target, "type": "target"},
         ]
-        
-        bar_width = Inches(1.2)
-        bar_gap = Inches(0.8)
-        left_margin = Inches(0.75)
-        
-        # Color palettes
-        cyan = RGBColor(0, 216, 246)
-        green = RGBColor(16, 185, 129)
-        red = RGBColor(239, 68, 68)
-        gray = RGBColor(148, 163, 184)
-        
-        # Draw bars
-        for idx, step in enumerate(steps):
-            startX = left_margin + idx * (bar_width + bar_gap)
-            yStart = getY(step["start"])
-            yEnd = getY(step["end"])
-            
-            top = min(yStart, yEnd)
-            height = max(abs(yStart - yEnd), Inches(0.04))
-            
-            # Determine color
-            if step["type"] in ["base", "target"]:
-                fill_color = cyan
-            elif step["change"] > 0:
-                fill_color = green
-            elif step["change"] < 0:
-                fill_color = red
+
+        # Connection line y-values (the "end" of each bar, before the next)
+        end_values = [base, step2, step3, step4, step5]
+
+        # ── Currency formatter ──
+        def fmt_curr(val: float) -> str:
+            sign = "+" if val > 0 else ""
+            av = abs(val)
+            if av >= 1_000_000:
+                return f"{sign}${val / 1_000_000:,.1f}M"
+            elif av >= 1_000:
+                return f"{sign}${val / 1_000:,.1f}k"
             else:
-                fill_color = gray
-                
-            # Draw bar shape
-            rect = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, startX, top, bar_width, height)
-            rect.fill.solid()
-            rect.fill.fore_color.rgb = fill_color
-            rect.line.fill.background() # No border
-            
-            # Add connecting line to next bar
-            if idx < len(steps) - 1:
-                line_y = getY(step["end"])
-                # Draw connecting line
-                conn_line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, startX + bar_width, line_y, bar_gap, Inches(0.01))
-                conn_line.fill.solid()
-                conn_line.fill.fore_color.rgb = RGBColor(100, 116, 139) # slate
-                conn_line.line.fill.background()
-                
+                return f"{sign}${val:,.0f}"
+
+        # ── Matplotlib chart rendering ──
+        fig, ax = plt.subplots(figsize=(12, 5.5))
+        fig.patch.set_facecolor(bg_color)
+        ax.set_facecolor(bg_color)
+
+        n = len(steps)
+        bar_width = 0.55
+        x_positions = np.arange(n)
+
+        for i, step in enumerate(steps):
+            # Determine bar color
+            if step["type"] in ("base", "target"):
+                color = primary_color
+            elif step["change"] > 0:
+                color = positive_color
+            elif step["change"] < 0:
+                color = negative_color
+            else:
+                color = muted_color
+
+            # Draw rounded bar using FancyBboxPatch
+            bar_rect = FancyBboxPatch(
+                (x_positions[i] - bar_width / 2, step["bottom"]),
+                bar_width,
+                max(step["height"], abs(step["change"]) * 0.003 or 1),  # min visible height
+                boxstyle="round,pad=0,rounding_size=0.06",
+                facecolor=color,
+                edgecolor="none",
+                zorder=3,
+                alpha=0.92,
+            )
+            ax.add_patch(bar_rect)
+
             # Value label above or below the bar
             val_text = fmt_curr(step["change"])
-            val_y = top - Inches(0.35) if step["change"] >= 0 else top + height + Inches(0.1)
-            val_box = slide.shapes.add_textbox(startX - Inches(0.4), val_y, bar_width + Inches(0.8), Inches(0.35))
-            val_tf = val_box.text_frame
-            val_p = val_tf.paragraphs[0]
-            val_p.text = val_text
-            val_p.alignment = PP_ALIGN.CENTER
-            val_p.font.size = Pt(10)
-            val_p.font.bold = True
-            val_p.font.name = "Arial"
-            val_p.font.color.rgb = fill_color
-            
-            # Category label under the bar
-            cat_box = slide.shapes.add_textbox(startX - Inches(0.4), chart_bottom + Inches(0.15), bar_width + Inches(0.8), Inches(0.4))
-            cat_tf = cat_box.text_frame
-            cat_tf.word_wrap = True
-            cat_p = cat_tf.paragraphs[0]
-            cat_p.text = step["label"]
-            cat_p.alignment = PP_ALIGN.CENTER
-            cat_p.font.size = Pt(10)
-            cat_p.font.bold = True
-            cat_p.font.name = "Arial"
-            cat_p.font.color.rgb = RGBColor(148, 163, 184)
-            
-        # Draw Legend at the bottom
-        legend_box = slide.shapes.add_textbox(Inches(2.5), Inches(6.6), Inches(8.33), Inches(0.4))
-        leg_tf = legend_box.text_frame
-        leg_p = leg_tf.paragraphs[0]
-        leg_p.alignment = PP_ALIGN.CENTER
-        
-        # Legend items
-        items = [
-            ("Scenario Totals", cyan),
-            ("Positive Impact (+)", green),
-            ("Negative Impact (-)", red),
+            if step["type"] in ("base", "target"):
+                label_color = foreground_color
+            elif step["change"] > 0:
+                label_color = positive_color
+            elif step["change"] < 0:
+                label_color = negative_color
+            else:
+                label_color = muted_color
+
+            bar_top = step["bottom"] + step["height"]
+            if step["change"] >= 0:
+                label_y = bar_top
+                va = "bottom"
+            else:
+                label_y = step["bottom"]
+                va = "top"
+
+            offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02 if ax.get_ylim()[1] != ax.get_ylim()[0] else 1000
+            label_y_adj = label_y + offset if va == "bottom" else label_y - offset
+
+            ax.text(
+                x_positions[i], label_y_adj, val_text,
+                ha="center", va=va,
+                fontsize=9.5, fontweight="bold", color=label_color,
+                fontfamily="sans-serif",
+                zorder=5,
+            )
+
+        # ── Dashed connector lines between bars ──
+        for i in range(n - 1):
+            y_line = end_values[i]
+            x_start = x_positions[i] + bar_width / 2
+            x_end = x_positions[i + 1] - bar_width / 2
+            ax.plot(
+                [x_start, x_end], [y_line, y_line],
+                color=connector_color,
+                linewidth=1.0,
+                linestyle=(0, (4, 3)),  # dashed
+                zorder=2,
+            )
+
+        # ── Axis styling ──
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, fontsize=9.5, fontweight="semibold",
+                           color=muted_color, fontfamily="sans-serif")
+        ax.tick_params(axis="x", length=0, pad=10)
+
+        # Y-axis: minimal, no ticks, no labels
+        ax.tick_params(axis="y", left=False, labelleft=False)
+
+        # Remove spines
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        # Light horizontal zero line
+        ax.axhline(y=0, color=border_color, linewidth=0.8, zorder=1)
+
+        # Auto y-limits with padding
+        all_vals = [s["bottom"] for s in steps] + [s["bottom"] + s["height"] for s in steps]
+        y_min = min(all_vals)
+        y_max = max(all_vals)
+        y_pad = (y_max - y_min) * 0.18 if y_max != y_min else 1000
+        ax.set_ylim(y_min - y_pad, y_max + y_pad)
+        ax.set_xlim(-0.6, n - 0.4)
+
+        # ── Legend ──
+        legend_elements = [
+            mpatches.Patch(facecolor=primary_color, edgecolor="none", label="Scenario Totals"),
+            mpatches.Patch(facecolor=positive_color, edgecolor="none", label="Positive Impact (+)"),
+            mpatches.Patch(facecolor=negative_color, edgecolor="none", label="Negative Impact (−)"),
         ]
-        
-        # PowerPoint doesn't support multiple colors in text easily without runs, so we use runs
-        first_item = True
-        for text, color in items:
-            run_bullet = leg_p.add_run() if not first_item else leg_p.add_run()
-            first_item = False
-            run_bullet.text = " ■  "
-            run_bullet.font.color.rgb = color
-            run_bullet.font.size = Pt(11)
-            
-            run_text = leg_p.add_run()
-            run_text.text = f"{text}      "
-            run_text.font.color.rgb = RGBColor(255, 255, 255)
-            run_text.font.size = Pt(11)
-            run_text.font.name = "Arial"
-            
+        leg = ax.legend(
+            handles=legend_elements,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.18),
+            ncol=3,
+            frameon=False,
+            fontsize=9,
+            labelcolor=foreground_color,
+            handlelength=1.2,
+            handletextpad=0.5,
+            columnspacing=2.5,
+        )
+        for text in leg.get_texts():
+            text.set_fontfamily("sans-serif")
+
+        plt.tight_layout(pad=1.0)
+
+        # ── Export chart as high-res PNG to memory ──
+        chart_buf = io.BytesIO()
+        fig.savefig(chart_buf, format="png", dpi=300, bbox_inches="tight",
+                    facecolor=bg_color, edgecolor="none", pad_inches=0.3)
+        plt.close(fig)
+        chart_buf.seek(0)
+
+        # ── Build PPTX slide ──
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+
+        blank_layout = prs.slide_layouts[6]
+        slide = prs.slides.add_slide(blank_layout)
+
+        # Dark background
+        bg = slide.background
+        fill = bg.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(15, 18, 37)  # matches bg_color
+
+        # ── Title text (top-left) ──
+        title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.35), Inches(6.0), Inches(1.0))
+        tf = title_box.text_frame
+        tf.word_wrap = True
+
+        p_sub = tf.paragraphs[0]
+        p_sub.text = "VCM WATERFALL BRIDGE"
+        p_sub.font.size = Pt(10)
+        p_sub.font.bold = True
+        p_sub.font.color.rgb = RGBColor(139, 149, 168)
+        p_sub.font.name = "Segoe UI"
+
+        p_title = tf.add_paragraph()
+        p_title.text = "Scenario VCM Bridge (USD)"
+        p_title.font.size = Pt(22)
+        p_title.font.bold = True
+        p_title.font.color.rgb = RGBColor(238, 240, 244)
+        p_title.font.name = "Segoe UI"
+        p_title.space_before = Pt(4)
+
+        # ── Filter info (top-right) ──
+        filter_box = slide.shapes.add_textbox(Inches(8.5), Inches(0.35), Inches(4.3), Inches(1.0))
+        tf_f = filter_box.text_frame
+        tf_f.word_wrap = True
+
+        p_mat = tf_f.paragraphs[0]
+        p_mat.alignment = PP_ALIGN.RIGHT
+        p_mat.text = f"MATERIAL: {payload.material_filter}"
+        p_mat.font.size = Pt(9)
+        p_mat.font.bold = True
+        p_mat.font.color.rgb = RGBColor(139, 149, 168)
+        p_mat.font.name = "Segoe UI"
+
+        p_reg = tf_f.add_paragraph()
+        p_reg.alignment = PP_ALIGN.RIGHT
+        p_reg.text = f"REGION: {payload.region_filter}"
+        p_reg.font.size = Pt(9)
+        p_reg.font.bold = True
+        p_reg.font.color.rgb = RGBColor(139, 149, 168)
+        p_reg.font.name = "Segoe UI"
+        p_reg.space_before = Pt(3)
+
+        # ── Embed the chart image ──
+        chart_left = Inches(0.3)
+        chart_top = Inches(1.5)
+        chart_width = Inches(12.7)
+        slide.shapes.add_picture(chart_buf, chart_left, chart_top, width=chart_width)
+
+        # ── Footer branding ──
+        footer_box = slide.shapes.add_textbox(Inches(0.6), Inches(7.0), Inches(5.0), Inches(0.35))
+        f_tf = footer_box.text_frame
+        f_p = f_tf.paragraphs[0]
+        f_p.text = "Financial Planner — FP&A 2026"
+        f_p.font.size = Pt(8)
+        f_p.font.italic = True
+        f_p.font.color.rgb = RGBColor(100, 108, 130)
+        f_p.font.name = "Segoe UI"
+
+        # ── Stream result ──
         out = io.BytesIO()
         prs.save(out)
         out.seek(0)
-        
+
         headers = {
             "Content-Disposition": 'attachment; filename="vcm_waterfall_bridge.pptx"'
         }
-        
+
         return StreamingResponse(
             out,
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
