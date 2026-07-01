@@ -10,8 +10,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Check, CircleAlert, Eye, Loader2, Trash2, Upload, Plus } from "lucide-react";
+import { Check, CircleAlert, Eye, Loader2, Trash2, Upload, Plus, Download } from "lucide-react";
 import { fmtNumber } from "@/lib/format";
+
+
 
 function FileCard({ fileKey, label, description }: { fileKey: string; label: string; description: string }) {
   const {
@@ -88,7 +90,16 @@ function FileCard({ fileKey, label, description }: { fileKey: string; label: str
             {validating && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
           </div>
           <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{description}</div>
-          <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">{fileKey}</div>
+          <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/70">
+            <span className="font-mono">{fileKey}</span>
+            <a
+              href={`/api/templates/${fileKey}`}
+              download={`${fileKey}_template.xlsx`}
+              className="underline hover:text-primary transition-colors cursor-pointer flex items-center gap-1 font-medium text-primary/80"
+            >
+              <Download className="size-3" /> Template
+            </a>
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-2 mt-auto">

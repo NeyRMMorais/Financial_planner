@@ -11,13 +11,13 @@ import { Login } from "@/components/app/Login";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Financial Planner — FP&A 2026 Planning" },
+      { title: "Financial Planner" },
       {
         name: "description",
         content:
           "Corporate FP&A planning dashboard: scenarios, calculated revenue/VCM tables, file uploads, and side-by-side variance comparison.",
       },
-      { property: "og:title", content: "Financial Planner — FP&A 2026 Planning" },
+      { property: "og:title", content: "Financial Planner" },
       {
         property: "og:description",
         content: "Premium FP&A planning workspace with scenario management, calculation pipeline and variance analysis.",

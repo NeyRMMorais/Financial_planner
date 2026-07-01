@@ -748,3 +748,91 @@ def log_user_login(payload: LoginLogInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+TEMPLATE_DATA = {
+    "volume_data": {
+        "columns": ["Material", "Material ID", "Date", "Sold to ID", "Sold to", "Ship to ID", "Ship to", "Plant", "Volume"],
+        "rows": [
+            ["Material A", "MAT-A", "2026-01", "CUST-01", "Customer 01", "SHIP-01", "Ship to 01", "PLANT-01", 10.000],
+            ["Material A", "MAT-A", "2026-02", "CUST-01", "Customer 01", "SHIP-01", "Ship to 01", "PLANT-01", 15.000],
+            ["Material B", "MAT-B", "2026-01", "CUST-02", "Customer 02", "SHIP-02", "Ship to 02", "PLANT-01", 5.500],
+        ]
+    },
+    "base_prices": {
+        "columns": ["Sold to ID", "Ship to ID", "Material ID", "Price"],
+        "rows": [
+            ["CUST-01", "SHIP-01", "MAT-A", 150.00],
+            ["CUST-02", "SHIP-02", "MAT-B", 230.50],
+            ["CUST-01", "SHIP-01", "MAT-B", 180.00],
+        ]
+    },
+    "base_costs": {
+        "columns": ["Plant", "Material ID", "Period", "Cost"],
+        "rows": [
+            ["PLANT-01", "MAT-A", "2026-01", 50.00],
+            ["PLANT-01", "MAT-A", "2026-02", 52.50],
+            ["PLANT-01", "MAT-B", "2026-01", 65.00],
+        ]
+    },
+    "base_var_costs": {
+        "columns": ["Material", "Material ID", "Variable Cost"],
+        "rows": [
+            ["Material A", "MAT-A", 12.50],
+            ["Material B", "MAT-B", 18.00],
+            ["Material C", "MAT-C", 14.20],
+        ]
+    },
+    "base_dist_costs": {
+        "columns": ["Ship to", "Ship to ID", "Distribution Cost"],
+        "rows": [
+            ["Ship to 01", "SHIP-01", 5.00],
+            ["Ship to 02", "SHIP-02", 7.20],
+            ["Ship to 03", "SHIP-03", 4.50],
+        ]
+    },
+    "fx_rates": {
+        "columns": ["Period", "Currency", "Rate"],
+        "rows": [
+            ["2026-01", "EUR", 0.9200],
+            ["2026-02", "EUR", 0.9150],
+            ["2026-01", "CAD", 1.3700],
+        ]
+    },
+    "plant_currency": {
+        "columns": ["Plant", "Currency"],
+        "rows": [
+            ["PLANT-01", "USD"],
+            ["PLANT-02", "EUR"],
+            ["PLANT-03", "CAD"],
+        ]
+    }
+}
+
+
+@router.get("/templates/{file_type}")
+def get_file_template(file_type: str):
+    """Generate and return an Excel template populated with headers and example rows."""
+    if file_type not in TEMPLATE_DATA:
+        raise HTTPException(status_code=400, detail="Invalid template file type requested.")
+    
+    data = TEMPLATE_DATA[file_type]
+    df = pd.DataFrame(data["rows"], columns=data["columns"])
+    
+    # Write to Excel in memory using openpyxl
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Template")
+    
+    out.seek(0)
+    
+    headers = {
+        "Content-Disposition": f'attachment; filename="{file_type}_template.xlsx"'
+    }
+    
+    return StreamingResponse(
+        out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers
+    )
+
+
