@@ -38,7 +38,6 @@ export function Sidebar({
         {!collapsed && (
           <div className="leading-tight">
             <div className="text-[15px] font-semibold tracking-tight">Financial Planner</div>
-            <div className="text-[11px] text-muted-foreground uppercase tracking-[0.14em]">FP&amp;A 2026 Planning</div>
           </div>
         )}
       </div>
