@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { useAppStore, BridgeResult } from "@/store/useAppStore";
 import { fmtCurrency, fmtVolume } from "@/lib/format";
-import { ArrowUpRight, ArrowDownRight, ChevronDown, Search } from "lucide-react";
+import { ArrowUpRight, ArrowDownRight, ChevronDown, Search, Presentation, Loader2 } from "lucide-react";
 
 interface BridgeWaterfallProps {
   data: BridgeResult;
@@ -139,10 +139,46 @@ function MultiSelect({ label, options, selected, onChange }: MultiSelectProps) {
 }
 
 export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
-  const { activeCompareScenarioA, activeCompareScenarioB } = useAppStore();
+  const { activeCompareScenarioA, activeCompareScenarioB, exportBridgePPTX } = useAppStore();
   const [activeTab, setActiveTab] = useState<"material" | "month">("material");
   const [selectedMaterials, setSelectedMaterials] = useState<string[]>([]);
   const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPPTX = async () => {
+    setExporting(true);
+    try {
+      const matFilterText = selectedMaterials.length === materials.length 
+        ? "All Materials" 
+        : selectedMaterials.length === 0 
+          ? "None" 
+          : `${selectedMaterials.length} Selected`;
+
+      const regFilterText = selectedRegions.length === regions.length 
+        ? "All Regions" 
+        : selectedRegions.length === 0 
+          ? "None" 
+          : selectedRegions.join(", ");
+
+      await exportBridgePPTX({
+        scenario_a: activeCompareScenarioA || "Base VCM",
+        scenario_b: activeCompareScenarioB || "Target VCM",
+        vcm_usd_a: Number(summary.vcm_usd_a),
+        volume_effect: Number(summary.volume_effect),
+        price_effect: Number(summary.price_effect),
+        cost_effect: Number(summary.cost_effect),
+        fx_effect: Number(summary.fx_effect),
+        vcm_usd_b: Number(summary.vcm_usd_b),
+        material_filter: matFilterText,
+        region_filter: regFilterText
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Failed to export PowerPoint slide");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const rawPreview = data.raw_preview || [];
 
@@ -404,6 +440,19 @@ export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
                 onChange={setSelectedRegions}
               />
             </div>
+
+            <button
+              onClick={handleExportPPTX}
+              disabled={exporting}
+              className="h-8 px-3 rounded-md border border-primary/20 bg-primary/10 hover:bg-primary/20 text-primary text-[12px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              {exporting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Presentation className="size-3.5" />
+              )}
+              Export PPTX
+            </button>
           </div>
         </div>
 

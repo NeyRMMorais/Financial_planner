@@ -266,6 +266,27 @@ def test_get_login_logs():
     assert first_log["timestamp"] == "2026-07-01 13:20:00"
 
 
+def test_export_bridge_pptx():
+    """Test PowerPoint presentation export endpoint."""
+    payload = {
+        "scenario_a": "Baseline",
+        "scenario_b": "Scenario A",
+        "vcm_usd_a": 1000000.0,
+        "volume_effect": 200000.0,
+        "price_effect": 150000.0,
+        "cost_effect": -50000.0,
+        "fx_effect": 0.0,
+        "vcm_usd_b": 1300000.0,
+        "material_filter": "All Materials",
+        "region_filter": "All Regions"
+    }
+    response = client.post("/api/export/bridge-pptx", json=payload)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    assert len(response.content) > 0
+
+
+
 
 
 

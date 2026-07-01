@@ -163,6 +163,18 @@ interface AppState {
   loginUser: (email: string, name: string, provider: 'google' | 'microsoft' | 'other') => Promise<void>;
   logoutUser: () => void;
   fetchLoginLogs: (email: string) => Promise<any[]>;
+  exportBridgePPTX: (payload: {
+    scenario_a: string;
+    scenario_b: string;
+    vcm_usd_a: number;
+    volume_effect: number;
+    price_effect: number;
+    cost_effect: number;
+    fx_effect: number;
+    vcm_usd_b: number;
+    material_filter: string;
+    region_filter: string;
+  }) => Promise<void>;
   validateAndDiffScenarioFile: (fileType: string, file: File) => Promise<{
     status: string;
     is_new: boolean;
@@ -246,6 +258,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       throw new Error("Failed to load audit logs");
     }
     return res.json();
+  },
+
+  exportBridgePPTX: async (payload) => {
+    const res = await fetch("/api/export/bridge-pptx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error("Failed to export PPTX");
+    
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `vcm_waterfall_bridge_${payload.scenario_a}_vs_${payload.scenario_b}.pptx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   fetchScenarios: async () => {

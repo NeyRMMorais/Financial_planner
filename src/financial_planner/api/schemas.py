@@ -101,3 +101,17 @@ class LoginLogInput(BaseModel):
     provider: str
 
 
+class PPTXExportInput(BaseModel):
+    scenario_a: str
+    scenario_b: str
+    vcm_usd_a: Decimal
+    volume_effect: Decimal
+    price_effect: Decimal
+    cost_effect: Decimal
+    fx_effect: Decimal
+    vcm_usd_b: Decimal
+    material_filter: str
+    region_filter: str
+
+
+
