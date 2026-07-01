@@ -278,12 +278,18 @@ def test_export_bridge_pptx():
         "fx_effect": 0.0,
         "vcm_usd_b": 1300000.0,
         "material_filter": "All Materials",
-        "region_filter": "All Regions"
+        "region_filter": "All Regions",
+        "theme": "light"
     }
     response = client.post("/api/export/bridge-pptx", json=payload)
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     assert len(response.content) > 0
+
+    payload["theme"] = "dark"
+    response_dark = client.post("/api/export/bridge-pptx", json=payload)
+    assert response_dark.status_code == 200
+    assert len(response_dark.content) > 0
 
 
 

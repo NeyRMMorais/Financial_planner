@@ -112,6 +112,7 @@ class PPTXExportInput(BaseModel):
     vcm_usd_b: Decimal
     material_filter: str
     region_filter: str
+    theme: str = "dark"
 
 
 

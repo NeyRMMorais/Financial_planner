@@ -174,6 +174,7 @@ interface AppState {
     vcm_usd_b: number;
     material_filter: string;
     region_filter: string;
+    theme?: string;
   }) => Promise<void>;
   validateAndDiffScenarioFile: (fileType: string, file: File) => Promise<{
     status: string;

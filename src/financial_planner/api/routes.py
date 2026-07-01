@@ -892,16 +892,35 @@ def export_bridge_pptx(payload: PPTXExportInput):
         from pptx.dml.color import RGBColor
         from pptx.enum.text import PP_ALIGN
 
-        # ── Theme colors (matching the app's dark theme CSS) ──
-        bg_color = "#0f1225"         # slide & chart background
-        card_bg = "#181c35"          # card surface
-        primary_color = "#22b8cf"    # teal/cyan for scenario totals
-        positive_color = "#10b981"   # green for positive impact
-        negative_color = "#ef4444"   # coral/red for negative impact
-        muted_color = "#8b95a8"      # muted text / axis labels
-        foreground_color = "#eef0f4" # white-ish text
-        border_color = "#2a2f4a"     # grid lines, connectors
-        connector_color = "#4a5068"  # dashed connector lines
+        # ── Theme colors (matching the app's CSS) ──
+        is_dark = payload.theme != "light"
+
+        if is_dark:
+            bg_color = "#0f1225"
+            primary_color = "#22b8cf"
+            positive_color = "#10b981"
+            negative_color = "#ef4444"
+            muted_color = "#8b95a8"
+            foreground_color = "#eef0f4"
+            border_color = "#2a2f4a"
+            connector_color = "#4a5068"
+            slide_bg_rgb = RGBColor(15, 18, 37)
+            title_rgb = RGBColor(238, 240, 244)
+            subtitle_rgb = RGBColor(139, 149, 168)
+            footer_rgb = RGBColor(100, 108, 130)
+        else:
+            bg_color = "#f8f9fc"
+            primary_color = "#2563b0"
+            positive_color = "#16a34a"
+            negative_color = "#dc2626"
+            muted_color = "#64748b"
+            foreground_color = "#1e293b"
+            border_color = "#e2e5ea"
+            connector_color = "#94a3b8"
+            slide_bg_rgb = RGBColor(248, 249, 252)
+            title_rgb = RGBColor(30, 41, 59)
+            subtitle_rgb = RGBColor(100, 116, 139)
+            footer_rgb = RGBColor(148, 163, 184)
 
         # ── Data preparation ──
         base = float(payload.vcm_usd_a)
@@ -1088,11 +1107,11 @@ def export_bridge_pptx(payload: PPTXExportInput):
         blank_layout = prs.slide_layouts[6]
         slide = prs.slides.add_slide(blank_layout)
 
-        # Dark background
+        # Slide background
         bg = slide.background
         fill = bg.fill
         fill.solid()
-        fill.fore_color.rgb = RGBColor(15, 18, 37)  # matches bg_color
+        fill.fore_color.rgb = slide_bg_rgb
 
         # ── Title text (top-left) ──
         title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.35), Inches(6.0), Inches(1.0))
@@ -1103,14 +1122,14 @@ def export_bridge_pptx(payload: PPTXExportInput):
         p_sub.text = "VCM WATERFALL BRIDGE"
         p_sub.font.size = Pt(10)
         p_sub.font.bold = True
-        p_sub.font.color.rgb = RGBColor(139, 149, 168)
+        p_sub.font.color.rgb = subtitle_rgb
         p_sub.font.name = "Segoe UI"
 
         p_title = tf.add_paragraph()
         p_title.text = "Scenario VCM Bridge (USD)"
         p_title.font.size = Pt(22)
         p_title.font.bold = True
-        p_title.font.color.rgb = RGBColor(238, 240, 244)
+        p_title.font.color.rgb = title_rgb
         p_title.font.name = "Segoe UI"
         p_title.space_before = Pt(4)
 
@@ -1124,7 +1143,7 @@ def export_bridge_pptx(payload: PPTXExportInput):
         p_mat.text = f"MATERIAL: {payload.material_filter}"
         p_mat.font.size = Pt(9)
         p_mat.font.bold = True
-        p_mat.font.color.rgb = RGBColor(139, 149, 168)
+        p_mat.font.color.rgb = subtitle_rgb
         p_mat.font.name = "Segoe UI"
 
         p_reg = tf_f.add_paragraph()
@@ -1132,7 +1151,7 @@ def export_bridge_pptx(payload: PPTXExportInput):
         p_reg.text = f"REGION: {payload.region_filter}"
         p_reg.font.size = Pt(9)
         p_reg.font.bold = True
-        p_reg.font.color.rgb = RGBColor(139, 149, 168)
+        p_reg.font.color.rgb = subtitle_rgb
         p_reg.font.name = "Segoe UI"
         p_reg.space_before = Pt(3)
 
@@ -1149,7 +1168,7 @@ def export_bridge_pptx(payload: PPTXExportInput):
         f_p.text = "Financial Planner — FP&A 2026"
         f_p.font.size = Pt(8)
         f_p.font.italic = True
-        f_p.font.color.rgb = RGBColor(100, 108, 130)
+        f_p.font.color.rgb = footer_rgb
         f_p.font.name = "Segoe UI"
 
         # ── Stream result ──

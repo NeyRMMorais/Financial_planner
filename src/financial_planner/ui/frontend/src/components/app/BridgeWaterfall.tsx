@@ -160,6 +160,8 @@ export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
           ? "None" 
           : selectedRegions.join(", ");
 
+      const isDark = document.documentElement.classList.contains("dark");
+
       await exportBridgePPTX({
         scenario_a: activeCompareScenarioA || "Base VCM",
         scenario_b: activeCompareScenarioB || "Target VCM",
@@ -170,7 +172,8 @@ export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
         fx_effect: Number(summary.fx_effect),
         vcm_usd_b: Number(summary.vcm_usd_b),
         material_filter: matFilterText,
-        region_filter: regFilterText
+        region_filter: regFilterText,
+        theme: isDark ? "dark" : "light"
       });
     } catch (err) {
       console.error(err);
