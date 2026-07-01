@@ -239,5 +239,33 @@ def test_diff_scenario_file_extended():
     assert "var_cost_delta_by_material" in var_data
 
 
+def test_get_login_logs():
+    """Test retrieving login logs with admin vs non-admin email."""
+    # Write a test log line first to guarantee data is present
+    from pathlib import Path
+    log_file = Path("data/login_audit.log")
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write("[2026-07-01 13:20:00] User: Ney Morais (ney.morais@gmail.com) signed in via google\n")
+
+    # Unauthorized email should return 403
+    unauth_resp = client.get("/api/admin/login-logs?email=random@company.com")
+    assert unauth_resp.status_code == 403
+    assert "Forbidden" in unauth_resp.json()["detail"]
+
+    # Authorized email should return 200 and parse log entry correctly
+    auth_resp = client.get("/api/admin/login-logs?email=ney.morais@gmail.com")
+    assert auth_resp.status_code == 200
+    logs = auth_resp.json()
+    assert len(logs) >= 1
+    # Check parsing of fields
+    first_log = next((l for l in logs if l["email"] == "ney.morais@gmail.com"), None)
+    assert first_log is not None
+    assert first_log["name"] == "Ney Morais"
+    assert first_log["provider"] == "google"
+    assert first_log["timestamp"] == "2026-07-01 13:20:00"
+
+
+
 
 

@@ -162,6 +162,7 @@ interface AppState {
   setCompareScenarioB: (name: string) => void;
   loginUser: (email: string, name: string, provider: 'google' | 'microsoft' | 'other') => Promise<void>;
   logoutUser: () => void;
+  fetchLoginLogs: (email: string) => Promise<any[]>;
   validateAndDiffScenarioFile: (fileType: string, file: File) => Promise<{
     status: string;
     is_new: boolean;
@@ -236,6 +237,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   logoutUser: () => {
     localStorage.removeItem("planner_user");
     set({ user: null });
+  },
+
+  fetchLoginLogs: async (email) => {
+    const res = await fetch(`/api/admin/login-logs?email=${encodeURIComponent(email)}`);
+    if (!res.ok) {
+      if (res.status === 403) throw new Error("Forbidden: Admin access only");
+      throw new Error("Failed to load audit logs");
+    }
+    return res.json();
   },
 
   fetchScenarios: async () => {

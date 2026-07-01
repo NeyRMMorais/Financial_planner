@@ -7,6 +7,7 @@ import { ScenarioManager } from "@/components/app/ScenarioManager";
 import { Compare } from "@/components/app/Compare";
 import { useAppStore } from "@/store/useAppStore";
 import { Login } from "@/components/app/Login";
+import { AdminPanel } from "@/components/app/AdminPanel";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,6 +32,7 @@ const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
   dashboard: { title: "Dashboard", subtitle: "Calculated results for the active scenario" },
   manager: { title: "Scenario Manager", subtitle: "Input files, validation, and price overrides" },
   compare: { title: "Compare", subtitle: "Variance analysis across two scenarios" },
+  admin: { title: "Admin Panel", subtitle: "Review corporate application login audit trails" },
 };
 
 function AppPage() {
@@ -62,6 +64,7 @@ function AppPage() {
           {view === "dashboard" && <Dashboard />}
           {view === "manager" && <ScenarioManager />}
           {view === "compare" && <Compare />}
+          {view === "admin" && <AdminPanel />}
         </main>
       </div>
     </div>

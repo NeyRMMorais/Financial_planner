@@ -1,10 +1,11 @@
-import { LayoutDashboard, FolderCog, GitCompareArrows } from "lucide-react";
+import { LayoutDashboard, FolderCog, GitCompareArrows, ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAppStore } from "@/store/useAppStore";
 
 const APP_ICON_DARK = "/icon-dark.png";
 const APP_ICON_LIGHT = "/icon-light.png";
 
-export type ViewKey = "dashboard" | "manager" | "compare";
+export type ViewKey = "dashboard" | "manager" | "compare" | "admin";
 
 export function Sidebar({
   view,
@@ -18,11 +19,18 @@ export function Sidebar({
   dark?: boolean;
 }) {
   const appIcon = dark ? APP_ICON_DARK : APP_ICON_LIGHT;
+  const user = useAppStore((s) => s.user);
+  
   const items = [
     { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
     { key: "manager" as const, label: "Scenario Manager", icon: FolderCog },
     { key: "compare" as const, label: "Compare", icon: GitCompareArrows },
   ];
+
+  if (user && ["ney.morais@gmail.com", "ney.morais@outlook.com"].includes(user.email)) {
+    items.push({ key: "admin" as const, label: "Admin Logs", icon: ShieldAlert });
+  }
+
 
   return (
     <aside

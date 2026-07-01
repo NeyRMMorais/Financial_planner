@@ -836,3 +836,43 @@ def get_file_template(file_type: str):
     )
 
 
+@router.get("/admin/login-logs")
+def get_login_logs(email: str):
+    """Retrieve user login audit logs. Restricted to administrator."""
+    if email not in ["ney.morais@gmail.com", "ney.morais@outlook.com"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Forbidden: Only Ney Morais is authorized to view audit logs."
+        )
+    
+    log_file = Path("data/login_audit.log")
+    if not log_file.exists():
+        return []
+        
+    import re
+    log_pattern = re.compile(r"^\[(.*?)\] User: (.*?) \((.*?)\) signed in via (.*?)$")
+    
+    logs = []
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                match = log_pattern.match(line)
+                if match:
+                    timestamp, name, user_email, provider = match.groups()
+                    logs.append({
+                        "timestamp": timestamp,
+                        "name": name,
+                        "email": user_email,
+                        "provider": provider
+                    })
+        # Return newest logs first
+        logs.reverse()
+        return logs
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
