@@ -1,0 +1,19 @@
+.git
+.gcloudignore
+node_modules/
+src/financial_planner/ui/frontend/node_modules/
+dist/
+src/financial_planner/ui/frontend/dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.env
+.DS_Store
+scratch/
+financial_planner_codebase.zip
+
+# Include data/scenarios
+!data/scenarios/
+!data/scenarios/**

@@ -1,5 +1,11 @@
 import { create } from "zustand";
 
+export interface User {
+  email: string;
+  name: string;
+  provider: 'google' | 'microsoft' | 'other';
+}
+
 export interface Scenario {
   name: string;
   created_at: string;
@@ -38,6 +44,9 @@ export interface SummaryMetrics {
 export interface CompareMetrics {
   total_volume: number;
   total_revenue_usd: number;
+  total_rm_cost_usd: number;
+  total_var_cost_usd: number;
+  total_dist_cost_usd: number;
   total_vcm_usd: number;
   weighted_avg_price_usd: number;
   weighted_avg_vcm_usd: number;
@@ -70,6 +79,22 @@ export interface CompareResult {
   change_log: string[];
   vcm_variance_by_plant: PlantVariance[];
   vcm_variance_by_material: MaterialVariance[];
+}
+
+export interface BridgeSummary {
+  vcm_usd_a: number;
+  volume_effect: number;
+  price_effect: number;
+  cost_effect: number;
+  fx_effect: number;
+  vcm_usd_b: number;
+}
+
+export interface BridgeResult {
+  summary: BridgeSummary;
+  by_material: any[];
+  by_month: any[];
+  raw_preview: any[];
 }
 
 export type FileType =
@@ -110,9 +135,14 @@ interface AppState {
   loadingData: boolean;
   loadingCalculation: boolean;
 
+  user: User | null;
+
   compareScenarioA: string;
   compareScenarioB: string;
+  activeCompareScenarioA: string | null;
+  activeCompareScenarioB: string | null;
   compareResult: CompareResult | null;
+  bridgeResult: BridgeResult | null;
   loadingCompare: boolean;
   compareError: string | null;
 
@@ -130,6 +160,17 @@ interface AppState {
   setActiveResultsTab: (tab: AppState["activeResultsTab"]) => void;
   setCompareScenarioA: (name: string) => void;
   setCompareScenarioB: (name: string) => void;
+  loginUser: (email: string, name: string, provider: 'google' | 'microsoft' | 'other') => Promise<void>;
+  logoutUser: () => void;
+  validateAndDiffScenarioFile: (fileType: string, file: File) => Promise<{
+    status: string;
+    is_new: boolean;
+    diff: string[];
+    volume_delta_by_material?: any[];
+    price_delta_by_material?: any[];
+    var_cost_delta_by_material?: any[];
+    fx_delta_by_currency?: any[];
+  }>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -151,11 +192,51 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadingData: false,
   loadingCalculation: false,
 
+  user: (() => {
+    try {
+      const stored = localStorage.getItem("planner_user");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  })(),
+
   compareScenarioA: "",
   compareScenarioB: "",
+  activeCompareScenarioA: null,
+  activeCompareScenarioB: null,
   compareResult: null,
+  bridgeResult: null,
   loadingCompare: false,
   compareError: null,
+
+  loginUser: async (email, name, provider) => {
+    const userObj = { email, name, provider };
+    try {
+      // POST the login-log to backend
+      const res = await fetch("/api/login-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(userObj),
+      });
+      if (res.ok) {
+        localStorage.setItem("planner_user", JSON.stringify(userObj));
+        set({ user: userObj });
+      } else {
+        throw new Error("Failed to register access in backend audit logs");
+      }
+    } catch (err) {
+      console.error("Login logging failed:", err);
+      // Still set the user state locally for development / fallback flow
+      localStorage.setItem("planner_user", JSON.stringify(userObj));
+      set({ user: userObj });
+    }
+  },
+
+  logoutUser: () => {
+    localStorage.removeItem("planner_user");
+    set({ user: null });
+  },
 
   fetchScenarios: async () => {
     set({ loadingScenarios: true });
@@ -247,9 +328,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ selectedScenarioMeta: meta });
     } catch (err: any) {
       set({ calculationError: err.message });
+      throw err;
     } finally {
       set({ loadingData: false });
     }
+  },
+
+  validateAndDiffScenarioFile: async (fileType, file) => {
+    const name = get().selectedScenario;
+    if (!name) throw new Error("No scenario selected");
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`/api/scenarios/${name}/diff-file/${fileType}`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const errorDetail = await res.json().catch(() => ({}));
+      throw new Error(errorDetail.detail || "Validation failed");
+    }
+    return await res.json();
   },
 
   addOverride: async (override) => {
@@ -324,21 +422,41 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { compareScenarioA, compareScenarioB } = get();
     if (!compareScenarioA || !compareScenarioB) return;
     if (compareScenarioA === compareScenarioB) {
-      set({ compareError: "Please select two different scenarios.", compareResult: null });
+      set({ compareError: "Please select two different scenarios.", compareResult: null, bridgeResult: null });
       return;
     }
-    set({ loadingCompare: true, compareError: null, compareResult: null });
+    set({ loadingCompare: true, compareError: null, compareResult: null, bridgeResult: null });
     try {
-      const res = await fetch("/api/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario_a: compareScenarioA, scenario_b: compareScenarioB }),
-      });
-      if (!res.ok) {
-        const errorDetail = await res.json().catch(() => ({}));
+      const [resCompare, resBridge] = await Promise.all([
+        fetch("/api/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario_a: compareScenarioA, scenario_b: compareScenarioB }),
+        }),
+        fetch("/api/compare/bridge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario_a: compareScenarioA, scenario_b: compareScenarioB }),
+        })
+      ]);
+
+      if (!resCompare.ok) {
+        const errorDetail = await resCompare.json().catch(() => ({}));
         throw new Error(errorDetail.detail || "Comparison pipeline failed");
       }
-      set({ compareResult: await res.json() });
+      if (!resBridge.ok) {
+        const errorDetail = await resBridge.json().catch(() => ({}));
+        throw new Error(errorDetail.detail || "Bridge calculation failed");
+      }
+
+      const compareData = await resCompare.json();
+      const bridgeData = await resBridge.json();
+      set({
+        compareResult: compareData,
+        bridgeResult: bridgeData,
+        activeCompareScenarioA: compareScenarioA,
+        activeCompareScenarioB: compareScenarioB,
+      });
     } catch (err: any) {
       set({ compareError: err.message });
     } finally {

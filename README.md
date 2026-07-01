@@ -49,7 +49,7 @@ Financial_planner/
 │       │   └── validation.py
 │       ├── export/          # Structured outputs formatted for SAC
 │       │   └── __init__.py
-│       ├── ui/              # React/Vite + FluentUI 2 frontend
+│       ├── ui/              # React/Vite + shadcn/ui frontend
 │       │   └── frontend/
 │       │       ├── src/
 │       │       │   ├── App.tsx      # Main application shell
@@ -163,3 +163,30 @@ The raw monthly plant-specific raw material cost configuration file must contain
 *   **`Material ID`**: Unique product identifier code, e.g. `MAT-1001` (string).
 *   **`Period`**: The monthly period of the raw material cost in `YYYY-MM` format, constrained to the 2026 planning year.
 *   **`Cost`**: Raw material unit cost per metric ton (numeric string in raw CSV, parsed to `Decimal` in memory).
+
+### Variable Cost Planning Ingestion Input
+The raw variable cost configuration file must contain:
+
+*   **`Material`**: Product name description (string).
+*   **`Material ID`**: Unique product identifier code, e.g. `MAT-1001` (string).
+*   **`Variable Cost`**: Variable unit cost per metric ton (numeric string in raw CSV, parsed to `Decimal` in memory).
+
+### Distribution Cost Planning Ingestion Input
+The raw distribution cost configuration file must contain:
+
+*   **`Ship to`**: Receiving entity location description (string).
+*   **`Ship to ID`**: Receiving entity location code, e.g. `SHIP-001-NL` (string).
+*   **`Distribution Cost`**: Distribution unit cost per metric ton (numeric string in raw CSV, parsed to `Decimal` in memory).
+
+### FX Rates Ingestion Input
+The raw foreign exchange rates configuration file must contain:
+
+*   **`Period`**: The monthly period of the FX rate in `YYYY-MM` format, constrained to the 2026 planning year.
+*   **`Currency`**: Currency code, e.g. `EUR`, `BRL`, `USD` (string).
+*   **`Rate`**: Conversion rate against base planning currency (numeric string in raw CSV, parsed to `Decimal` in memory).
+
+### Plant Currency Ingestion Input
+The raw plant currency mapping file must contain:
+
+*   **`Plant`**: Manufacturing/shipping plant identifier, e.g. `PLANT-01` (string).
+*   **`Currency`**: Operating currency code of the plant, e.g. `EUR`, `BRL` (string).

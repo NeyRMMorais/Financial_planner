@@ -1,12 +1,12 @@
 # Design System
 
 ## Theme
-Fluent 2 inspired, highly structured layout with physical depth, soft geometry, and high data density.
+shadcn/ui inspired, highly structured layout with physical depth, soft geometry, and high data density.
 
 ## Colors
 All colors are configured for light and dark modes, utilizing a layered container approach.
 
-### Base Canvases (Mica Simulation)
+### Base Canvases
 * **Dark Mode:**
   * Root Background: `#1C1C1C`
   * Elevated Card/Panel Background: `#282828`
@@ -17,7 +17,7 @@ All colors are configured for light and dark modes, utilizing a layered containe
   * Sub-elevation/Header Background: `#FAFAFA`
 
 ### Interactive States & Accents
-* **Primary Brand Accent (Fluent Blue):**
+* **Primary Brand Accent:**
   * Base: `#0078D4` (Dark / Light Mode contrast compliant)
   * Hover: `#106EBE`
   * Active/Tactile: `#005A9E`
@@ -27,7 +27,7 @@ All colors are configured for light and dark modes, utilizing a layered containe
   * Dark Mode: `rgba(255, 255, 255, 0.08)`
   * Light Mode: `rgba(0, 0, 0, 0.06)`
 
-### Translucent Materials (Acrylic Simulation)
+### Translucent Materials
 * **Floating Overlays (context menus, tooltips, dialogs):**
   * Filter: `backdrop-blur-md`
   * Background (Dark): `rgba(40, 40, 40, 0.75)`

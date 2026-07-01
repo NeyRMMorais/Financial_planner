@@ -174,3 +174,70 @@ def test_diff_scenario_file():
     assert "is_new" in res_data
     assert "diff" in res_data
     assert isinstance(res_data["diff"], list)
+
+
+def test_compare_bridge():
+    """Test scenario margin bridge endpoint."""
+    payload = {
+        "scenario_a": "Baseline",
+        "scenario_b": "Baseline"
+    }
+    response = client.post("/api/compare/bridge", json=payload)
+    assert response.status_code == 200
+    res = response.json()
+    assert "summary" in res
+    assert "by_material" in res
+    assert "by_month" in res
+    assert "raw_preview" in res
+
+    summary = res["summary"]
+    assert float(summary["volume_effect"]) == pytest.approx(0.0, abs=1e-9)
+    assert float(summary["price_effect"]) == pytest.approx(0.0, abs=1e-9)
+    assert float(summary["cost_effect"]) == pytest.approx(0.0, abs=1e-9)
+    assert float(summary["fx_effect"]) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_login_log():
+    """Test the login audit log endpoint."""
+    payload = {
+        "email": "test@company.com",
+        "name": "Test User",
+        "provider": "google"
+    }
+    response = client.post("/api/login-log", json=payload)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] == "success"
+    
+    # Assert log file is created and has the user logged
+    from pathlib import Path
+    log_file = Path("data/login_audit.log")
+    assert log_file.exists()
+    
+    content = log_file.read_text(encoding="utf-8")
+    assert "test@company.com" in content
+    assert "Test User" in content
+    assert "google" in content
+
+
+def test_diff_scenario_file_extended():
+    """Test extended dry-run diff check returning FX and var costs deltas."""
+    # Test FX
+    fx_csv = "Period,Currency,Rate\n2026-01,EUR,0.95\n2026-02,EUR,0.94\n"
+    fx_files = {"file": ("test_fx_rates.csv", fx_csv, "text/csv")}
+    fx_resp = client.post("/api/scenarios/Baseline/diff-file/fx_rates", files=fx_files)
+    assert fx_resp.status_code == 200
+    fx_data = fx_resp.json()
+    assert "fx_delta_by_currency" in fx_data
+
+    # Test Var Costs
+    var_csv = "Material,Material ID,Variable Cost\nProduct X,MAT-1001,4.50\n"
+    var_files = {"file": ("test_var_costs.csv", var_csv, "text/csv")}
+    var_resp = client.post("/api/scenarios/Baseline/diff-file/base_var_costs", files=var_files)
+    assert var_resp.status_code == 200
+    var_data = var_resp.json()
+    assert "var_cost_delta_by_material" in var_data
+
+
+
+

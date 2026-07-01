@@ -1,18 +1,32 @@
+import { useState } from "react";
 import { useAppStore } from "@/store/useAppStore";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, ArrowRight, ArrowUpRight, ArrowDownRight, AlertCircle } from "lucide-react";
 import { fmtCurrency, fmtNumber, fmtPriceUnit, fmtVolume } from "@/lib/format";
+import { BridgeWaterfall } from "./BridgeWaterfall";
 
-function DeltaCell({ value, format = "num" }: { value: number; format?: "num" | "usd" | "vol" | "price" }) {
-  const positive = value > 0;
-  const negative = value < 0;
-  const arrow = positive ? (
+function DeltaCell({
+  value,
+  format = "num",
+  invertColor = false,
+}: {
+  value: number;
+  format?: "num" | "usd" | "vol" | "price";
+  invertColor?: boolean;
+}) {
+  const isPositiveEffect = invertColor ? value < 0 : value > 0;
+  const isNegativeEffect = invertColor ? value > 0 : value < 0;
+  const arrow = value > 0 ? (
     <ArrowUpRight className="size-3.5" />
-  ) : negative ? (
+  ) : value < 0 ? (
     <ArrowDownRight className="size-3.5" />
   ) : null;
-  const color = positive ? "text-positive" : negative ? "text-negative" : "text-muted-foreground";
+  const color = isPositiveEffect
+    ? "text-positive"
+    : isNegativeEffect
+      ? "text-negative"
+      : "text-muted-foreground";
   const display =
     format === "usd"
       ? fmtCurrency(value, "USD")
@@ -34,20 +48,26 @@ function DeltaKPI({
   abs,
   pct,
   format,
+  invertColor = false,
 }: {
   label: string;
   abs: number;
   pct?: string;
   format: "usd" | "vol" | "price";
+  invertColor?: boolean;
 }) {
-  const positive = abs > 0;
-  const negative = abs < 0;
-  const color = positive ? "border-positive/40 bg-positive/5" : negative ? "border-negative/40 bg-negative/5" : "";
+  const isPositiveEffect = invertColor ? abs < 0 : abs > 0;
+  const isNegativeEffect = invertColor ? abs > 0 : abs < 0;
+  const color = isPositiveEffect
+    ? "border-positive/40 bg-positive/5"
+    : isNegativeEffect
+      ? "border-negative/40 bg-negative/5"
+      : "";
   return (
     <div className={"rounded-xl border p-4 shadow-elevated bg-card " + color}>
       <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
       <div className="mt-2 text-xl font-semibold">
-        <DeltaCell value={abs} format={format} />
+        <DeltaCell value={abs} format={format} invertColor={invertColor} />
       </div>
       {pct !== undefined && <div className="mt-1 text-[12px] text-muted-foreground tabular">{pct}</div>}
     </div>
@@ -55,6 +75,7 @@ function DeltaKPI({
 }
 
 export function Compare() {
+  const [activeView, setActiveView] = useState<"summary" | "bridge">("summary");
   const {
     scenarios,
     compareScenarioA,
@@ -63,6 +84,7 @@ export function Compare() {
     setCompareScenarioB,
     runComparison,
     compareResult: r,
+    bridgeResult,
     loadingCompare,
     compareError,
   } = useAppStore();
@@ -117,6 +139,34 @@ export function Compare() {
             >
               {loadingCompare ? <Loader2 className="size-4 animate-spin" /> : null} Run comparison
             </Button>
+            {r && (
+              <div className="flex items-center gap-1 p-0.5 rounded-md bg-secondary sm:ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setActiveView("summary")}
+                  className={
+                    "h-8 px-3 text-[12px] font-medium rounded transition-colors cursor-pointer " +
+                    (activeView === "summary"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground")
+                  }
+                >
+                  Variance Summary
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveView("bridge")}
+                  className={
+                    "h-8 px-3 text-[12px] font-medium rounded transition-colors cursor-pointer " +
+                    (activeView === "bridge"
+                      ? "bg-card text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground")
+                  }
+                >
+                  Margin Bridge
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -128,15 +178,36 @@ export function Compare() {
         </div>
       )}
 
-      {r && (
+      {r && activeView === "summary" && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <DeltaKPI label="Total Volume Δ" abs={r.absolute_diff.total_volume} pct={r.percentage_diff.total_volume} format="vol" />
             <DeltaKPI
               label="Total Revenue Δ"
               abs={r.absolute_diff.total_revenue_usd}
               pct={r.percentage_diff.total_revenue_usd}
               format="usd"
+            />
+            <DeltaKPI
+              label="RM Cost Δ"
+              abs={r.absolute_diff.total_rm_cost_usd}
+              pct={r.percentage_diff.total_rm_cost_usd}
+              format="usd"
+              invertColor
+            />
+            <DeltaKPI
+              label="Variable Cost Δ"
+              abs={r.absolute_diff.total_var_cost_usd}
+              pct={r.percentage_diff.total_var_cost_usd}
+              format="usd"
+              invertColor
+            />
+            <DeltaKPI
+              label="Dist. Cost Δ"
+              abs={r.absolute_diff.total_dist_cost_usd}
+              pct={r.percentage_diff.total_dist_cost_usd}
+              format="usd"
+              invertColor
             />
             <DeltaKPI
               label="Total VCM Δ"
@@ -210,6 +281,10 @@ export function Compare() {
             </div>
           )}
         </>
+      )}
+
+      {r && activeView === "bridge" && bridgeResult && (
+        <BridgeWaterfall data={bridgeResult} />
       )}
     </div>
   );

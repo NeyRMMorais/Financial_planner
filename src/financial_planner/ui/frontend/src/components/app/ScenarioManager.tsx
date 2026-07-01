@@ -14,18 +14,58 @@ import { Check, CircleAlert, Eye, Loader2, Trash2, Upload, Plus } from "lucide-r
 import { fmtNumber } from "@/lib/format";
 
 function FileCard({ fileKey, label, description }: { fileKey: string; label: string; description: string }) {
-  const { selectedScenarioMeta, uploadScenarioFile, fetchScenarioData, previewData, selectedScenario, loadingData } =
-    useAppStore();
+  const {
+    selectedScenarioMeta,
+    uploadScenarioFile,
+    validateAndDiffScenarioFile,
+    fetchScenarioData,
+    previewData,
+    selectedScenario,
+    loadingData,
+  } = useAppStore();
+
   const inputRef = useRef<HTMLInputElement>(null);
   const [openPreview, setOpenPreview] = useState(false);
+  const [openConfirm, setOpenConfirm] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [diffResult, setDiffResult] = useState<any | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
   const present = !!selectedScenarioMeta?.files_status?.[fileKey];
   const data = previewData[fileKey] || [];
 
-  const onChoose = () => inputRef.current?.click();
-  const onUpload = async (f: File | null) => {
-    if (!f) return;
-    await uploadScenarioFile(fileKey, f);
+  const onChoose = () => {
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+    inputRef.current?.click();
   };
+
+  const handleFileChange = async (f: File | null) => {
+    if (!f) return;
+    setSelectedFile(f);
+    setValidating(true);
+    setValidationError(null);
+    setDiffResult(null);
+    try {
+      const result = await validateAndDiffScenarioFile(fileKey, f);
+      setDiffResult(result);
+      setOpenConfirm(true);
+    } catch (err: any) {
+      setValidationError(err.message || "An unexpected error occurred during validation.");
+      setOpenConfirm(true);
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleConfirmOverwrite = async () => {
+    if (!selectedFile) return;
+    setOpenConfirm(false);
+    await uploadScenarioFile(fileKey, selectedFile);
+  };
+
   const onPreview = async () => {
     if (selectedScenario) await fetchScenarioData(selectedScenario, fileKey);
     setOpenPreview(true);
@@ -42,17 +82,20 @@ function FileCard({ fileKey, label, description }: { fileKey: string; label: str
         >
           {present ? <Check className="size-4" /> : <CircleAlert className="size-4" />}
         </div>
-        <div className="min-w-0">
-          <div className="text-sm font-medium leading-tight">{label}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium leading-tight flex items-center gap-2">
+            {label}
+            {validating && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+          </div>
           <div className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">{description}</div>
           <div className="mt-1 font-mono text-[10px] text-muted-foreground/70">{fileKey}</div>
         </div>
       </div>
       <div className="flex items-center gap-2 mt-auto">
-        <Button size="sm" variant="outline" className="flex-1" onClick={onChoose}>
+        <Button size="sm" variant="outline" className="flex-1 cursor-pointer" onClick={onChoose} disabled={validating}>
           <Upload className="size-3.5" /> Upload
         </Button>
-        <Button size="sm" variant="ghost" onClick={onPreview} disabled={!present}>
+        <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onPreview} disabled={!present}>
           <Eye className="size-3.5" /> Preview
         </Button>
         <input
@@ -60,9 +103,209 @@ function FileCard({ fileKey, label, description }: { fileKey: string; label: str
           type="file"
           accept=".csv"
           className="hidden"
-          onChange={(e) => onUpload(e.target.files?.[0] ?? null)}
+          onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
         />
       </div>
+
+      {/* Confirmation & Validation Result Dialog */}
+      <Dialog open={openConfirm} onOpenChange={setOpenConfirm}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {validationError ? "Validation Rejection" : "Confirm Overwrite / Upload"}
+            </DialogTitle>
+            <DialogDescription>
+              {validationError 
+                ? "The selected file could not be uploaded due to validation errors." 
+                : `Review changes for ${label} before applying them to the active scenario.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {validationError ? (
+            <div className="space-y-4 py-2">
+              <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive flex items-start gap-2">
+                <CircleAlert className="size-4 shrink-0 mt-0.5" />
+                <span className="font-medium whitespace-pre-wrap">{validationError}</span>
+              </div>
+              <div className="flex justify-end">
+                <Button variant="outline" className="cursor-pointer" onClick={() => setOpenConfirm(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            diffResult && (
+              <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+                {/* Structure Diff Logs */}
+                {diffResult.diff && diffResult.diff.length > 0 && (
+                  <div className="bg-muted/40 border rounded-lg p-3 space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Structural File Changes
+                    </div>
+                    <ul className="text-xs space-y-1 text-foreground/80 list-disc list-inside">
+                      {diffResult.diff.map((log: string, idx: number) => (
+                        <li key={idx}>{log}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Specific volume diff */}
+                {diffResult.volume_delta_by_material && diffResult.volume_delta_by_material.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Volume Deltas by Material (MT)
+                    </div>
+                    <div className="border rounded overflow-hidden">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="px-3 py-1.5 font-medium">Material ID</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Base</th>
+                            <th className="px-3 py-1.5 font-medium text-right">New</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffResult.volume_delta_by_material.slice(0, 10).map((v: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="px-3 py-1 font-mono">{v.material_id}</td>
+                              <td className="px-3 py-1 text-right font-mono">{fmtNumber(v.base_volume, 3)}</td>
+                              <td className="px-3 py-1 text-right font-mono">{fmtNumber(v.new_volume, 3)}</td>
+                              <td className={`px-3 py-1 text-right font-mono font-medium ${v.delta > 0 ? "text-positive" : "text-destructive"}`}>
+                                {v.delta > 0 ? `+${fmtNumber(v.delta, 3)}` : fmtNumber(v.delta, 3)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {diffResult.volume_delta_by_material.length > 10 && (
+                      <div className="text-[11px] text-muted-foreground text-center">
+                        showing first 10 of {diffResult.volume_delta_by_material.length} material deltas
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Specific price diff */}
+                {diffResult.price_delta_by_material && diffResult.price_delta_by_material.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Average Price Deltas by Material (USD)
+                    </div>
+                    <div className="border rounded overflow-hidden">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="px-3 py-1.5 font-medium">Material ID</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Base Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">New Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffResult.price_delta_by_material.slice(0, 10).map((p: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="px-3 py-1 font-mono">{p.material_id}</td>
+                              <td className="px-3 py-1 text-right font-mono">${fmtNumber(p.base_avg_price, 2)}</td>
+                              <td className="px-3 py-1 text-right font-mono">${fmtNumber(p.new_avg_price, 2)}</td>
+                              <td className={`px-3 py-1 text-right font-mono font-medium ${p.delta > 0 ? "text-positive" : "text-destructive"}`}>
+                                {p.delta > 0 ? `+$${fmtNumber(p.delta, 2)}` : `-$${fmtNumber(Math.abs(p.delta), 2)}`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Specific var costs diff */}
+                {diffResult.var_cost_delta_by_material && diffResult.var_cost_delta_by_material.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Average Variable Cost Deltas by Material (USD)
+                    </div>
+                    <div className="border rounded overflow-hidden">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="px-3 py-1.5 font-medium">Material ID</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Base Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">New Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffResult.var_cost_delta_by_material.slice(0, 10).map((v: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="px-3 py-1 font-mono">{v.material_id}</td>
+                              <td className="px-3 py-1 text-right font-mono">${fmtNumber(v.base_var_cost, 2)}</td>
+                              <td className="px-3 py-1 text-right font-mono">${fmtNumber(v.new_var_cost, 2)}</td>
+                              <td className={`px-3 py-1 text-right font-mono font-medium ${v.delta > 0 ? "text-positive" : "text-destructive"}`}>
+                                {v.delta > 0 ? `+$${fmtNumber(v.delta, 2)}` : `-$${fmtNumber(Math.abs(v.delta), 2)}`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Specific FX diff */}
+                {diffResult.fx_delta_by_currency && diffResult.fx_delta_by_currency.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Average Exchange Rate Deltas (against USD)
+                    </div>
+                    <div className="border rounded overflow-hidden">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-muted/50 border-b">
+                          <tr>
+                            <th className="px-3 py-1.5 font-medium">Currency</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Base Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">New Avg</th>
+                            <th className="px-3 py-1.5 font-medium text-right">Delta</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diffResult.fx_delta_by_currency.map((fx: any, idx: number) => (
+                            <tr key={idx} className="border-b">
+                              <td className="px-3 py-1 font-semibold">{fx.currency}</td>
+                              <td className="px-3 py-1 text-right font-mono">{fmtNumber(fx.base_rate, 4)}</td>
+                              <td className="px-3 py-1 text-right font-mono">{fmtNumber(fx.new_rate, 4)}</td>
+                              <td className={`px-3 py-1 text-right font-mono font-medium ${fx.delta > 0 ? "text-positive" : "text-destructive"}`}>
+                                {fx.delta > 0 ? `+${fmtNumber(fx.delta, 4)}` : fmtNumber(fx.delta, 4)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {(!diffResult.diff || diffResult.diff.length === 0) && (
+                  <div className="text-sm text-center py-4 text-muted-foreground">
+                    No structural changes detected between the current and selected files.
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 border-t pt-4">
+                  <Button variant="outline" className="cursor-pointer" onClick={() => setOpenConfirm(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleConfirmOverwrite} className="bg-gradient-brand text-white shadow-glow cursor-pointer">
+                    Overwrite Scenario File
+                  </Button>
+                </div>
+              </div>
+            )
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={openPreview} onOpenChange={setOpenPreview}>
         <DialogContent className="max-w-5xl">

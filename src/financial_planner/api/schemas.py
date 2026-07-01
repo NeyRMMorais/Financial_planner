@@ -63,6 +63,9 @@ class CompareRequest(BaseModel):
 class CompareMetrics(BaseModel):
     total_volume: Decimal
     total_revenue_usd: Decimal
+    total_rm_cost_usd: Decimal
+    total_var_cost_usd: Decimal
+    total_dist_cost_usd: Decimal
     total_vcm_usd: Decimal
     weighted_avg_price_usd: Decimal
     weighted_avg_vcm_usd: Decimal
@@ -74,3 +77,27 @@ class ScenarioDifference(BaseModel):
     change_log: List[str]
     vcm_variance_by_plant: List[dict]
     vcm_variance_by_material: List[dict]
+
+
+class BridgeSummary(BaseModel):
+    vcm_usd_a: Decimal
+    volume_effect: Decimal
+    price_effect: Decimal
+    cost_effect: Decimal
+    fx_effect: Decimal
+    vcm_usd_b: Decimal
+
+
+class BridgeResponse(BaseModel):
+    summary: BridgeSummary
+    by_material: List[dict]
+    by_month: List[dict]
+    raw_preview: List[dict]
+
+
+class LoginLogInput(BaseModel):
+    email: str
+    name: str
+    provider: str
+
+

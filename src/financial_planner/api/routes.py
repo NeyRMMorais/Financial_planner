@@ -18,6 +18,7 @@ from src.financial_planner.api.schemas import (
     CalculationResponse,
     CompareRequest,
     ScenarioDifference,
+    LoginLogInput,
 )
 from src.financial_planner.data_ingestion.scenario_manager import (
     list_scenarios,
@@ -37,6 +38,8 @@ from src.financial_planner.data_ingestion.price_loader import load_pricing_data
 from src.financial_planner.data_ingestion.variable_cost_loader import load_variable_cost_data
 from src.financial_planner.calculations.pricing import PriceOverride, resolve_monthly_prices
 from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
+from src.financial_planner.calculations.bridge import calculate_margin_bridge, summarize_margin_bridge
+from src.financial_planner.api.schemas import BridgeResponse
 
 router = APIRouter()
 
@@ -315,14 +318,14 @@ async def diff_scenario_file(name: str, file_type: str, file: UploadFile = File(
         if file_type == "base_prices" and df_new is not None:
             new_avg = (
                 df_new.groupby("Material ID")["Price"]
-                .mean()
+                .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.000"))
                 .reset_index()
                 .rename(columns={"Price": "new_avg_price"})
             )
             if df_base is not None:
                 base_avg = (
                     df_base.groupby("Material ID")["Price"]
-                    .mean()
+                    .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.000"))
                     .reset_index()
                     .rename(columns={"Price": "base_avg_price"})
                 )
@@ -352,12 +355,88 @@ async def diff_scenario_file(name: str, file_type: str, file: UploadFile = File(
             # Sort by absolute delta descending
             price_delta_by_material.sort(key=lambda x: abs(x["delta"]), reverse=True)
 
+        # 7. For base_var_costs: compute per-material variable cost delta
+        var_cost_delta_by_material = None
+        if file_type == "base_var_costs" and df_new is not None:
+            new_v = (
+                df_new.groupby("Material ID")["Variable Cost"]
+                .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.000"))
+                .reset_index()
+                .rename(columns={"Variable Cost": "new_var_cost"})
+            )
+            if df_base is not None:
+                base_v = (
+                    df_base.groupby("Material ID")["Variable Cost"]
+                    .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.000"))
+                    .reset_index()
+                    .rename(columns={"Variable Cost": "base_var_cost"})
+                )
+                merged_v = pd.merge(base_v, new_v, on="Material ID", how="outer")
+                merged_v["base_var_cost"] = merged_v["base_var_cost"].fillna(Decimal("0.000"))
+                merged_v["new_var_cost"] = merged_v["new_var_cost"].fillna(Decimal("0.000"))
+                merged_v["delta"] = merged_v["new_var_cost"] - merged_v["base_var_cost"]
+            else:
+                merged_v = new_v.copy()
+                merged_v["base_var_cost"] = Decimal("0.000")
+                merged_v["delta"] = merged_v["new_var_cost"]
+
+            var_cost_delta_by_material = [
+                {
+                    "material_id": row["Material ID"],
+                    "base_var_cost": float(row["base_var_cost"]),
+                    "new_var_cost": float(row["new_var_cost"]),
+                    "delta": float(row["delta"]),
+                }
+                for _, row in merged_v.iterrows()
+                if float(row["delta"]) != 0.0
+            ]
+            var_cost_delta_by_material.sort(key=lambda x: abs(x["delta"]), reverse=True)
+
+        # 8. For fx_rates: compute per-currency average rate delta
+        fx_delta_by_currency = None
+        if file_type == "fx_rates" and df_new is not None:
+            new_f = (
+                df_new.groupby("Currency")["Rate"]
+                .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.0000"))
+                .reset_index()
+                .rename(columns={"Rate": "new_rate"})
+            )
+            if df_base is not None:
+                base_f = (
+                    df_base.groupby("Currency")["Rate"]
+                    .apply(lambda s: s.sum() / Decimal(len(s)) if len(s) > 0 else Decimal("0.0000"))
+                    .reset_index()
+                    .rename(columns={"Rate": "base_rate"})
+                )
+                merged_f = pd.merge(base_f, new_f, on="Currency", how="outer")
+                merged_f["base_rate"] = merged_f["base_rate"].fillna(Decimal("0.0000"))
+                merged_f["new_rate"] = merged_f["new_rate"].fillna(Decimal("0.0000"))
+                merged_f["delta"] = merged_f["new_rate"] - merged_f["base_rate"]
+            else:
+                merged_f = new_f.copy()
+                merged_f["base_rate"] = Decimal("0.0000")
+                merged_f["delta"] = merged_f["new_rate"]
+
+            fx_delta_by_currency = [
+                {
+                    "currency": row["Currency"],
+                    "base_rate": float(row["base_rate"]),
+                    "new_rate": float(row["new_rate"]),
+                    "delta": float(row["delta"]),
+                }
+                for _, row in merged_f.iterrows()
+                if float(row["delta"]) != 0.0
+            ]
+            fx_delta_by_currency.sort(key=lambda x: abs(x["delta"]), reverse=True)
+
         return {
             "status": "success",
             "is_new": is_new,
             "diff": diff_logs,
             "volume_delta_by_material": volume_delta_by_material,
             "price_delta_by_material": price_delta_by_material,
+            "var_cost_delta_by_material": var_cost_delta_by_material,
+            "fx_delta_by_currency": fx_delta_by_currency,
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Validation failed: {str(e)}")
@@ -511,12 +590,22 @@ def compare_two_scenarios(payload: CompareRequest):
 
         # Absolute Delta
         abs_diff = {}
-        for key in ["total_volume", "total_revenue_usd", "total_vcm_usd", "weighted_avg_price_usd", "weighted_avg_vcm_usd"]:
+        compare_keys = [
+            "total_volume",
+            "total_revenue_usd",
+            "total_rm_cost_usd",
+            "total_var_cost_usd",
+            "total_dist_cost_usd",
+            "total_vcm_usd",
+            "weighted_avg_price_usd",
+            "weighted_avg_vcm_usd",
+        ]
+        for key in compare_keys:
             abs_diff[key] = metrics_b[key] - metrics_a[key]
 
         # Percentage Delta
         pct_diff = {}
-        for key in ["total_volume", "total_revenue_usd", "total_vcm_usd", "weighted_avg_price_usd", "weighted_avg_vcm_usd"]:
+        for key in compare_keys:
             val_a = metrics_a[key]
             delta = metrics_b[key] - val_a
             pct_diff[key] = f"{(delta / val_a * 100):+.1f}%" if val_a != 0 else "0.0%"
@@ -551,3 +640,111 @@ def compare_two_scenarios(payload: CompareRequest):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Comparison failed: {str(e)}")
+
+
+@router.post("/compare/bridge", response_model=BridgeResponse)
+def compare_bridge(payload: CompareRequest):
+    """Calculate PVM + FX margin bridge between two scenarios."""
+    scen_a = payload.scenario_a
+    scen_b = payload.scenario_b
+
+    try:
+        data_a = load_scenario_data(scen_a)
+        data_b = load_scenario_data(scen_b)
+
+        missing_a = [k for k, v in data_a.items() if v is None and k != "price_overrides"]
+        missing_b = [k for k, v in data_b.items() if v is None and k != "price_overrides"]
+
+        if missing_a:
+            raise HTTPException(status_code=400, detail=f"Scenario A is incomplete: {missing_a}")
+        if missing_b:
+            raise HTTPException(status_code=400, detail=f"Scenario B is incomplete: {missing_b}")
+
+        # Run Scenario A
+        over_list_a = [PriceOverride(item["Material ID"], item["Sold to ID"], item["Ship to ID"], item["Date"], item["Price"]) for item in data_a["price_overrides"]]
+        prices_res_a = resolve_monthly_prices(data_a["base_prices"], over_list_a)
+        df_calc_a = run_simulation_pipeline(
+            data_a["volume_data"], prices_res_a, data_a["base_costs"],
+            data_a["base_var_costs"], data_a["base_dist_costs"],
+            data_a["plant_currency"], data_a["fx_rates"]
+        )
+
+        # Run Scenario B
+        over_list_b = [PriceOverride(item["Material ID"], item["Sold to ID"], item["Ship to ID"], item["Date"], item["Price"]) for item in data_b["price_overrides"]]
+        prices_res_b = resolve_monthly_prices(data_b["base_prices"], over_list_b)
+        df_calc_b = run_simulation_pipeline(
+            data_b["volume_data"], prices_res_b, data_b["base_costs"],
+            data_b["base_var_costs"], data_b["base_dist_costs"],
+            data_b["plant_currency"], data_b["fx_rates"]
+        )
+
+        # Run row-by-row bridge calculations
+        df_bridge = calculate_margin_bridge(
+            df_calc_a,
+            df_calc_b,
+            data_a["fx_rates"],
+            data_b["fx_rates"]
+        )
+
+        # Aggregate Summary
+        summary = summarize_margin_bridge(df_bridge)
+
+        # Breakdown by Material
+        df_mat = (
+            df_bridge.groupby(["Material", "Material ID"])[
+                ["Vol_A", "Vol_B", "VCM_USD_A", "VCM_USD_B", "Volume_Effect", "Price_Effect", "Cost_Effect", "FX_Effect"]
+            ]
+            .sum()
+            .reset_index()
+        )
+        # Sort by VCM Delta absolute value descending
+        df_mat["delta"] = df_mat["VCM_USD_B"] - df_mat["VCM_USD_A"]
+        df_mat["abs_delta"] = df_mat["delta"].abs()
+        df_mat.sort_values(by="abs_delta", ascending=False, inplace=True)
+        df_mat.drop(columns=["abs_delta", "delta"], inplace=True)
+
+        # Breakdown by Month
+        df_month = (
+            df_bridge.groupby(["Date"])[
+                ["Vol_A", "Vol_B", "VCM_USD_A", "VCM_USD_B", "Volume_Effect", "Price_Effect", "Cost_Effect", "FX_Effect"]
+            ]
+            .sum()
+            .reset_index()
+        )
+        df_month["sort_key"] = df_month["Date"].apply(lambda x: str(x))
+        df_month.sort_values(by="sort_key", inplace=True)
+        df_month.drop(columns=["sort_key"], inplace=True)
+
+        return {
+            "summary": summary,
+            "by_material": df_to_records(df_mat),
+            "by_month": df_to_records(df_month),
+            "raw_preview": df_to_records(df_bridge),
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bridge calculation failed: {str(e)}")
+
+
+@router.post("/login-log")
+def log_user_login(payload: LoginLogInput):
+    """Log user access to the backend system for audit purposes."""
+    try:
+        import datetime
+        from pathlib import Path
+        
+        log_dir = Path("data")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "login_audit.log"
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_line = f"[{timestamp}] User: {payload.name} ({payload.email}) signed in via {payload.provider}\n"
+        
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(log_line)
+            
+        return {"status": "success", "message": "Login logged successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

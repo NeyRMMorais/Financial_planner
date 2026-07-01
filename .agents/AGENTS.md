@@ -35,8 +35,14 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
     *   `data_ingestion/`: File loading and data quality check engine.
     *   `calculations/`: Price, cost, margin, and scenario calculations (pure Python, pandas/polars, fully unit-testable).
     *   `export/`: File generation drivers for SAP Analytics Cloud.
-    *   `ui/frontend/`: React/Vite + FluentUI 2 frontend application.
+    *   `ui/frontend/`: React/Vite + shadcn/ui frontend application.
     *   `api/`: FastAPI backend that exposes all calculations and scenario management as a REST API. The `ui/` layer must remain a thin pass-through — no business logic.
+
+### 4. Terminal Crash Prevention
+*   **Rule 1:** **NEVER** print large amounts of data directly to the terminal.
+*   **Rule 2:** Redirect long output to temporary files.
+*   **Rule 3:** Avoid chaining complex commands with pipes.
+*   **Rule 4:** Append `; echo 'DONE'` at the end of executions to verify completion cleanly.
 
 ---
 
@@ -55,7 +61,7 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
 
 ## 📊 Current Development Phase
 
-*   **UI Migration (complete):** Streamlit has been fully removed. The React/Vite + FluentUI 2 frontend (`ui/frontend/`) is now the sole UI layer, backed by the FastAPI backend (`api/`).
+*   **UI Migration (complete):** Streamlit has been fully removed. The React/Vite + shadcn/ui frontend (`ui/frontend/`) is now the sole UI layer, backed by the FastAPI backend (`api/`).
 *   **Calculation Engine (Phase 2, complete):** Core Revenue, Pricing, and Monthly Raw Material Cost calculations have been implemented and validated. All features are exposed via FastAPI routes and consumed by the React frontend.
 *   **Roadmap:** Next we will implement UI simulation controls (Phase 3) and SAC export drivers (Phase 4).
 

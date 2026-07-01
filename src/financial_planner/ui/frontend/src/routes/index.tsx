@@ -6,6 +6,7 @@ import { Dashboard } from "@/components/app/Dashboard";
 import { ScenarioManager } from "@/components/app/ScenarioManager";
 import { Compare } from "@/components/app/Compare";
 import { useAppStore } from "@/store/useAppStore";
+import { Login } from "@/components/app/Login";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -35,15 +36,22 @@ const TITLES: Record<ViewKey, { title: string; subtitle: string }> = {
 function AppPage() {
   const [view, setView] = useState<ViewKey>("dashboard");
   const [dark, setDark] = useState(true);
+  const user = useAppStore((s) => s.user);
   const fetchScenarios = useAppStore((s) => s.fetchScenarios);
 
   useEffect(() => {
-    fetchScenarios();
-  }, [fetchScenarios]);
+    if (user) {
+      fetchScenarios();
+    }
+  }, [fetchScenarios, user]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  if (!user) {
+    return <Login />;
+  }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
@@ -59,3 +67,4 @@ function AppPage() {
     </div>
   );
 }
+

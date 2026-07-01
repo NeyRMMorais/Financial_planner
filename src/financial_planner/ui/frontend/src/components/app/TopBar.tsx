@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Moon, Sun, Plus, ChevronDown, Loader2, DollarSign } from "lucide-react";
+import { Moon, Sun, Plus, ChevronDown, Loader2, DollarSign, LogOut } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import {
   DropdownMenu,
@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { NewScenarioDialog } from "./NewScenarioDialog";
 
-const APP_ICON_DARK = "/icon-dark.png";
+const APP_ICON_DARK = "/icon-dark.png?v=2";
 const APP_ICON_LIGHT = "/icon-light.png";
 
 export function TopBar({ title, subtitle, dark, onToggleDark }: { title: string; subtitle?: string; dark?: boolean; onToggleDark?: () => void }) {
@@ -24,6 +24,8 @@ export function TopBar({ title, subtitle, dark, onToggleDark }: { title: string;
     setCurrencyMode,
     loadingCalculation,
     loadingScenarios,
+    user,
+    logoutUser,
   } = useAppStore();
 
   const appIcon = dark ? APP_ICON_DARK : APP_ICON_LIGHT;
@@ -119,6 +121,32 @@ export function TopBar({ title, subtitle, dark, onToggleDark }: { title: string;
           >
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
+
+          {user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className="size-9 rounded-full cursor-pointer bg-accent/20">
+                  <span className="text-xs font-semibold uppercase">{user.name.slice(0, 2)}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[220px]">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user.name}</p>
+                    <p className="text-xs leading-none text-muted-foreground truncate">{user.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-xs text-muted-foreground disabled" disabled>
+                  Signed in via {user.provider === "google" ? "Google" : user.provider === "microsoft" ? "Microsoft" : "Custom Credentials"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={logoutUser} className="text-destructive focus:bg-destructive/10 focus:text-destructive cursor-pointer">
+                  <LogOut className="size-4 mr-2" /> Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           <Button onClick={() => setOpenNew(true)} className="h-9 bg-gradient-brand text-white shadow-glow hover:opacity-90">
             <Plus className="size-4" /> New scenario

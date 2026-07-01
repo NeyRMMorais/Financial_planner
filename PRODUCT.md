@@ -11,7 +11,7 @@ FP&A (Financial Planning & Analysis) and Corporate Finance managers. They operat
 To manage, simulate, and export monthly volume-to-margin plans for the 2026 calendar year. The application ingests sales volumes, applies exchange rates, price lists, and raw material costs, runs simulations, preserves version-controlled scenarios with detailed change logs, and exports structured datasets to upstream planning engines like SAP Analytics Cloud. Success means zero calculation latency, precise scenario comparisons, and highly efficient data entry.
 
 ## Brand Personality
-Modern, polished, and highly structured corporate productivity. Emulates the Microsoft Fluent 2 design language with physical grounding, subtle depth, and clear container hierarchies.
+Modern, polished, and highly structured corporate productivity. Emulates the shadcn/ui design language with clean layout, physical grounding, subtle depth, and clear container hierarchies.
 * **3-word personality:** Structured, Polished, Precise
 * **Emotional goals:** Professional confidence, visual calm, expert reliability
 
@@ -23,7 +23,7 @@ Modern, polished, and highly structured corporate productivity. Emulates the Mic
 * Low-contrast, hard-to-read numeric tables.
 
 ## Design Principles
-1. **Physical Grounding & Depth:** Use layered backgrounds (simulating Fluent's Mica and Acrylic materials), subtle drop shadows, and top-edge highlights to create distinct container levels rather than flat, floating shapes.
+1. **Physical Grounding & Depth:** Use layered backgrounds, subtle drop shadows, and top-edge highlights to create distinct container levels rather than flat, floating shapes.
 2. **High-Density Scannability:** Prioritize dense, grid-based information layouts. Text, numbers, and inputs should have comfortable but compact margins, optimized for fast keyboard navigation and side-by-side Excel comparisons.
 3. **Strict Geometric Cohesion:** Distinguish layout hierarchy through a locked corner-radius scale: 8px for top-level containers and cards, 4px for interactive elements (buttons, inputs, dropdowns), and pill-shape for AI prompts and tags.
 4. **Stateless Visual Auditability:** Every action, active scenario, and difference comparison must be visibly labeled. Never allow silent states; help the planner trace how costs and revenues flow through different simulations.
