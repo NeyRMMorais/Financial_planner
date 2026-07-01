@@ -21,14 +21,14 @@ export function Sidebar({
   const appIcon = dark ? APP_ICON_DARK : APP_ICON_LIGHT;
   const user = useAppStore((s) => s.user);
   
-  const items = [
-    { key: "dashboard" as const, label: "Dashboard", icon: LayoutDashboard },
-    { key: "manager" as const, label: "Scenario Manager", icon: FolderCog },
-    { key: "compare" as const, label: "Compare", icon: GitCompareArrows },
+  const items: { key: ViewKey; label: string; icon: any }[] = [
+    { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { key: "manager", label: "Scenario Manager", icon: FolderCog },
+    { key: "compare", label: "Compare", icon: GitCompareArrows },
   ];
 
   if (user && ["ney.morais@gmail.com", "ney.morais@outlook.com"].includes(user.email)) {
-    items.push({ key: "admin" as const, label: "Admin Logs", icon: ShieldAlert });
+    items.push({ key: "admin", label: "Admin Logs", icon: ShieldAlert });
   }
 
 
