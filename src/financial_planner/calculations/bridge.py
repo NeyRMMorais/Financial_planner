@@ -471,7 +471,8 @@ def generate_bridge_commentary(
             )
 
             # Call Gemini
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             text = response.text.strip()
             
@@ -492,6 +493,8 @@ def generate_bridge_commentary(
                 ai_bullets.insert(0, "[AI-Generated Summary]")
                 return ai_bullets
         except Exception as e:
+            import logging
+            logging.error(f"Gemini commentary generation failed: {e}", exc_info=True)
             # Fall back silently to deterministic bullets
             pass
 
