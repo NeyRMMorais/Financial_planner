@@ -45,7 +45,7 @@ The **Financial Planner** is a Corporate Finance / Financial Planning & Analysis
 *   **Rule 4:** Append `; echo 'DONE'` at the end of executions to verify completion cleanly.
 
 ### 5. Production Deployment Restriction
-*   **Rule:** **NEVER** build and push/deploy the application to production GCP / Cloud Run unless the user explicitly requests it. Focus strictly on local development and verification.
+*   **Rule:** **NEVER** build, push, or deploy any changes to production GCP or Cloud Run unless the user explicitly and directly requests it. Focus strictly on local development, testing, and verification. Any deploy commands (e.g. gcloud run deploy) are strictly prohibited unless Ney explicitly requests deployment.
 
 ---
 
