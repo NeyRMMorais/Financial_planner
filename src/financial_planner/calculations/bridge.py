@@ -471,7 +471,7 @@ def generate_bridge_commentary(
             )
 
             # Call Gemini
-            model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             text = response.text.strip()
