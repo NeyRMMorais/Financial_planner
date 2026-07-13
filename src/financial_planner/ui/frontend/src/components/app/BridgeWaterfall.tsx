@@ -173,7 +173,8 @@ export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
         vcm_usd_b: Number(summary.vcm_usd_b),
         material_filter: matFilterText,
         region_filter: regFilterText,
-        theme: isDark ? "dark" : "light"
+        theme: isDark ? "dark" : "light",
+        commentary: data.commentary
       });
     } catch (err) {
       console.error(err);
@@ -568,6 +569,47 @@ export function BridgeWaterfall({ data }: BridgeWaterfallProps) {
           </div>
         </div>
       </div>
+
+      {/* Commentary Card */}
+      {data.commentary && data.commentary.length > 0 && (() => {
+        const isAI = data.commentary[0] === "[AI-Generated Summary]";
+        const bullets = data.commentary.slice(1);
+        
+        return (
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-elevated space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                  <Presentation className="size-4" />
+                </div>
+                <h3 className="text-sm font-semibold text-foreground tracking-tight">Bridge Driver Insights</h3>
+              </div>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${isAI ? 'bg-gradient-brand text-white shadow-glow' : 'bg-secondary text-muted-foreground'}`}>
+                {isAI ? 'AI-Synthesized' : 'Rule-Based Fallback'}
+              </span>
+            </div>
+            
+            <ul className="space-y-3 text-[13px] text-muted-foreground pl-1">
+              {bullets.map((bullet, idx) => {
+                const parts = bullet.split("**");
+                const formattedText = parts.map((part, pIdx) => {
+                  if (pIdx % 2 === 1) {
+                    return <strong key={pIdx} className="font-semibold text-foreground">{part}</strong>;
+                  }
+                  return part;
+                });
+                
+                return (
+                  <li key={idx} className="flex items-start gap-2.5 leading-relaxed">
+                    <span className="size-1.5 rounded-full bg-primary/60 shrink-0 mt-2" />
+                    <span>{formattedText}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })()}
 
       {/* Detailed Breakdown Tables */}
       <div className="rounded-2xl border border-border bg-card shadow-elevated overflow-hidden">

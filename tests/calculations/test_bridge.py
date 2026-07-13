@@ -207,3 +207,98 @@ def test_bridge_full_reconciliation(mock_fx_rates, mock_fx_rates_b, keys) -> Non
     assert summary["vcm_usd_a"] == Decimal("2500.00")
     assert summary["vcm_usd_b"] == Decimal("2880.00")
     assert summary["vcm_usd_a"] + summary["volume_effect"] + summary["price_effect"] + summary["cost_effect"] + summary["fx_effect"] == summary["vcm_usd_b"]
+
+
+def test_generate_bridge_commentary_deterministic() -> None:
+    from src.financial_planner.calculations.bridge import generate_bridge_commentary
+    
+    summary = {
+        "vcm_usd_a": Decimal("2500000.00"),
+        "volume_effect": Decimal("-50000.00"),
+        "price_effect": Decimal("3000000.00"),
+        "cost_effect": Decimal("-1200000.00"),
+        "fx_effect": Decimal("150000.00"),
+        "vcm_usd_b": Decimal("4400000.00"),
+    }
+    by_material = [
+        {
+            "Material": "Product Alpha",
+            "Material ID": "MAT-1",
+            "Price_Effect": Decimal("2000000.00"),
+            "Cost_Effect": Decimal("-1000000.00"),
+            "Volume_Effect": Decimal("-30000.00"),
+            "FX_Effect": Decimal("100000.00")
+        },
+        {
+            "Material": "Product Beta",
+            "Material ID": "MAT-2",
+            "Price_Effect": Decimal("1000000.00"),
+            "Cost_Effect": Decimal("-200000.00"),
+            "Volume_Effect": Decimal("-20000.00"),
+            "FX_Effect": Decimal("50000.00")
+        }
+    ]
+    by_month = [
+        {
+            "Date": "2026-01",
+            "VCM_USD_A": Decimal("200000.00"),
+            "VCM_USD_B": Decimal("400000.00")
+        },
+        {
+            "Date": "2026-02",
+            "VCM_USD_A": Decimal("250000.00"),
+            "VCM_USD_B": Decimal("500000.00")
+        }
+    ]
+    
+    bullets = generate_bridge_commentary(summary, by_material, by_month)
+    assert len(bullets) > 0
+    assert bullets[0] == "[Deterministic Summary]"
+    # check that the text contains the values
+    assert "$1.90M" in bullets[1] # Delta: 4.4M - 2.5M = 1.9M
+    assert "Price Effect" in bullets[2] # rank 1
+
+
+def test_generate_bridge_commentary_ai(monkeypatch) -> None:
+    from src.financial_planner.calculations.bridge import generate_bridge_commentary
+    
+    # Mock GEMINI_API_KEY
+    monkeypatch.setenv("GEMINI_API_KEY", "mock_key")
+    
+    # Mock the GenerativeModel class and configure/generate_content call
+    class MockResponse:
+        text = "- AI summary bullet 1\n- AI summary bullet 2\n- AI summary bullet 3"
+        
+    class MockModel:
+        def __init__(self, name):
+            pass
+        def generate_content(self, prompt):
+            return MockResponse()
+            
+    import sys
+    # Create mock package for google.generativeai if needed, or if it is already installed, mock its class
+    try:
+        import google.generativeai as genai
+        monkeypatch.setattr(genai, "GenerativeModel", MockModel)
+        monkeypatch.setattr(genai, "configure", lambda api_key: None)
+    except ImportError:
+        # If not installed, create a mock module in sys.modules
+        import types
+        mock_genai = types.ModuleType("google.generativeai")
+        mock_genai.GenerativeModel = MockModel
+        mock_genai.configure = lambda api_key: None
+        sys.modules["google.generativeai"] = mock_genai
+        
+    summary = {
+        "vcm_usd_a": Decimal("2500000.00"),
+        "volume_effect": Decimal("-50000.00"),
+        "price_effect": Decimal("3000000.00"),
+        "cost_effect": Decimal("-1200000.00"),
+        "fx_effect": Decimal("150000.00"),
+        "vcm_usd_b": Decimal("4400000.00"),
+    }
+    
+    bullets = generate_bridge_commentary(summary, [], [])
+    assert len(bullets) > 0
+    assert bullets[0] == "[AI-Generated Summary]"
+    assert "AI summary bullet 1" in bullets[1]

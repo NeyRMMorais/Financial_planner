@@ -265,3 +265,234 @@ def summarize_margin_bridge(bridge_df: pd.DataFrame) -> Dict[str, Decimal]:
         "fx_effect": sum(bridge_df["FX_Effect"], Decimal("0.00")),
         "vcm_usd_b": sum(bridge_df["VCM_USD_B"], Decimal("0.00")),
     }
+
+
+def generate_bridge_commentary(
+    summary: Dict[str, Any],
+    by_material: List[Dict[str, Any]],
+    by_month: List[Dict[str, Any]]
+) -> List[str]:
+    """
+    Generate natural language commentary explaining the key drivers of the VCM bridge.
+    Uses Gemini API if GEMINI_API_KEY is available, otherwise falls back to a deterministic rule-based commentary.
+    """
+    # 1. Parse core metrics
+    vcm_a = Decimal(str(summary.get("vcm_usd_a", 0)))
+    vcm_b = Decimal(str(summary.get("vcm_usd_b", 0)))
+    vol_eff = Decimal(str(summary.get("volume_effect", 0)))
+    price_eff = Decimal(str(summary.get("price_effect", 0)))
+    cost_eff = Decimal(str(summary.get("cost_effect", 0)))
+    fx_eff = Decimal(str(summary.get("fx_effect", 0)))
+
+    delta = vcm_b - vcm_a
+    pct_change = (delta / vcm_a * 100) if vcm_a != 0 else Decimal("0.0")
+
+    # Helper formatters
+    def fmt_usd(val: Decimal) -> str:
+        av = abs(val)
+        sign = "-" if val < 0 else ""
+        if av >= 1_000_000:
+            return f"{sign}${av / 1_000_000:,.2f}M"
+        elif av >= 1_000:
+            return f"{sign}${av / 1_000:,.1f}k"
+        return f"{sign}${av:,.2f}"
+
+    # Determine rank of effects
+    effects = [
+        ("Price Effect", price_eff),
+        ("Volume Effect", vol_eff),
+        ("Cost Effect", cost_eff),
+        ("FX Effect", fx_eff)
+    ]
+    # Sort by absolute value descending
+    ranked_effects = sorted(effects, key=lambda x: abs(x[1]), reverse=True)
+    primary_name, primary_val = ranked_effects[0]
+    secondary_name, secondary_val = ranked_effects[1]
+
+    # Find material details
+    # Favorable price driver
+    top_price_fav = None
+    if by_material:
+        price_fav_list = [m for m in by_material if Decimal(str(m.get("Price_Effect", 0))) > 0]
+        if price_fav_list:
+            top_price_fav = max(price_fav_list, key=lambda x: Decimal(str(x.get("Price_Effect", 0))))
+    
+    # Unfavorable price driver
+    top_price_unfav = None
+    if by_material:
+        price_unfav_list = [m for m in by_material if Decimal(str(m.get("Price_Effect", 0))) < 0]
+        if price_unfav_list:
+            top_price_unfav = min(price_unfav_list, key=lambda x: Decimal(str(x.get("Price_Effect", 0))))
+
+    # Favorable/unfavorable cost driver
+    top_cost_fav = None
+    top_cost_unfav = None
+    if by_material:
+        cost_fav_list = [m for m in by_material if Decimal(str(m.get("Cost_Effect", 0))) > 0]
+        if cost_fav_list:
+            top_cost_fav = max(cost_fav_list, key=lambda x: Decimal(str(x.get("Cost_Effect", 0))))
+        cost_unfav_list = [m for m in by_material if Decimal(str(m.get("Cost_Effect", 0))) < 0]
+        if cost_unfav_list:
+            top_cost_unfav = min(cost_unfav_list, key=lambda x: Decimal(str(x.get("Cost_Effect", 0))))
+
+    # Volume/mix driver
+    top_vol_fav = None
+    top_vol_unfav = None
+    if by_material:
+        vol_fav_list = [m for m in by_material if Decimal(str(m.get("Volume_Effect", 0))) > 0]
+        if vol_fav_list:
+            top_vol_fav = max(vol_fav_list, key=lambda x: Decimal(str(x.get("Volume_Effect", 0))))
+        vol_unfav_list = [m for m in by_material if Decimal(str(m.get("Volume_Effect", 0))) < 0]
+        if vol_unfav_list:
+            top_vol_unfav = min(vol_unfav_list, key=lambda x: Decimal(str(x.get("Volume_Effect", 0))))
+
+    # Month anomaly
+    top_month = None
+    if by_month:
+        # Find month with largest absolute variance in VCM (VCM_USD_B - VCM_USD_A)
+        def month_var(m):
+            v_a = Decimal(str(m.get("VCM_USD_A", 0)))
+            v_b = Decimal(str(m.get("VCM_USD_B", 0)))
+            return abs(v_b - v_a)
+        top_month = max(by_month, key=month_var)
+
+    # 2. Build Deterministic Commentary List
+    bullets = []
+    
+    # Bullet 1: Summary statement
+    status_word = "increased" if delta >= 0 else "decreased"
+    bullets.append(
+        f"Variable Contribution Margin (VCM) {status_word} by **{fmt_usd(delta)}** ({pct_change:+.1f}%), shifting from **{fmt_usd(vcm_a)}** in Scenario A to **{fmt_usd(vcm_b)}** in Scenario B."
+    )
+
+    # Bullet 2: Key drivers overview
+    primary_word = "favorable" if primary_val >= 0 else "unfavorable"
+    secondary_word = "favorable" if secondary_val >= 0 else "unfavorable"
+    bullets.append(
+        f"The variance was primarily driven by a **{primary_word} {primary_name}** of **{fmt_usd(primary_val)}**, followed by a **{secondary_word} {secondary_name}** of **{fmt_usd(secondary_val)}**."
+    )
+
+    # Bullet 3: Price effects
+    price_comment = f"Pricing adjustments contributed **{fmt_usd(price_eff)}** to the total variance."
+    if top_price_fav or top_price_unfav:
+        details = []
+        if top_price_fav:
+            details.append(f"favorable price adjustments in **{top_price_fav.get('Material')}** ({fmt_usd(Decimal(str(top_price_fav.get('Price_Effect', 0))))})")
+        if top_price_unfav:
+            details.append(f"unfavorable pricing in **{top_price_unfav.get('Material')}** ({fmt_usd(Decimal(str(top_price_unfav.get('Price_Effect', 0))))})")
+        price_comment += " Key highlights include " + " and ".join(details) + "."
+    bullets.append(price_comment)
+
+    # Bullet 4: Cost effects
+    cost_comment = f"Unit cost changes (including raw materials, distribution, and variable production) had a net impact of **{fmt_usd(cost_eff)}**."
+    if top_cost_fav or top_cost_unfav:
+        details = []
+        if top_cost_fav:
+            details.append(f"cost improvements in **{top_cost_fav.get('Material')}** ({fmt_usd(Decimal(str(top_cost_fav.get('Cost_Effect', 0))))})")
+        if top_cost_unfav:
+            details.append(f"cost increases/inflation in **{top_cost_unfav.get('Material')}** ({fmt_usd(Decimal(str(top_cost_unfav.get('Cost_Effect', 0))))})")
+        cost_comment += " This was driven by " + " and ".join(details) + "."
+    bullets.append(cost_comment)
+
+    # Bullet 5: Volume & Mix
+    vol_comment = f"Volume and mix shifts impacted margins by **{fmt_usd(vol_eff)}**."
+    if top_vol_fav or top_vol_unfav:
+        details = []
+        if top_vol_fav:
+            details.append(f"volume growth in **{top_vol_fav.get('Material')}** ({fmt_usd(Decimal(str(top_vol_fav.get('Volume_Effect', 0))))})")
+        if top_vol_unfav:
+            details.append(f"volume contraction in **{top_vol_unfav.get('Material')}** ({fmt_usd(Decimal(str(top_vol_unfav.get('Volume_Effect', 0))))})")
+        vol_comment += " Driven by " + " and ".join(details) + "."
+    bullets.append(vol_comment)
+
+    # Bullet 6: FX
+    bullets.append(
+        f"Exchange rate fluctuations had an impact of **{fmt_usd(fx_eff)}**."
+    )
+
+    # Bullet 7: Monthly anomaly
+    if top_month:
+        m_date = top_month.get("Date")
+        m_vcm_a = Decimal(str(top_month.get("VCM_USD_A", 0)))
+        m_vcm_b = Decimal(str(top_month.get("VCM_USD_B", 0)))
+        m_delta = m_vcm_b - m_vcm_a
+        bullets.append(
+            f"The month with the largest absolute variance was **{m_date}** with a shift of **{fmt_usd(m_delta)}**."
+        )
+
+    # Add marker to indicate source
+    bullets.insert(0, "[Deterministic Summary]")
+
+    # 3. AI Generation check
+    import os
+    api_key = os.getenv("GEMINI_API_KEY")
+    if api_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            
+            # Prepare details for prompt
+            facts = (
+                f"- Starting VCM (Scenario A): {fmt_usd(vcm_a)}\n"
+                f"- Ending VCM (Scenario B): {fmt_usd(vcm_b)}\n"
+                f"- Net Variance: {fmt_usd(delta)} ({pct_change:+.1f}%)\n"
+                f"- Price Effect: {fmt_usd(price_eff)}\n"
+                f"- Volume Effect: {fmt_usd(vol_eff)}\n"
+                f"- Cost Effect: {fmt_usd(cost_eff)}\n"
+                f"- FX Effect: {fmt_usd(fx_eff)}\n"
+            )
+            
+            if top_price_fav:
+                facts += f"- Top Favorable Price Driver: {top_price_fav.get('Material')} ({fmt_usd(Decimal(str(top_price_fav.get('Price_Effect', 0))))})\n"
+            if top_price_unfav:
+                facts += f"- Top Unfavorable Price Driver: {top_price_unfav.get('Material')} ({fmt_usd(Decimal(str(top_price_unfav.get('Price_Effect', 0))))})\n"
+            if top_cost_fav:
+                facts += f"- Top Cost Saving Driver: {top_cost_fav.get('Material')} ({fmt_usd(Decimal(str(top_cost_fav.get('Cost_Effect', 0))))})\n"
+            if top_cost_unfav:
+                facts += f"- Top Cost Inflation Drag: {top_cost_unfav.get('Material')} ({fmt_usd(Decimal(str(top_cost_unfav.get('Cost_Effect', 0))))})\n"
+            if top_month:
+                m_date = top_month.get("Date")
+                m_vcm_a = Decimal(str(top_month.get("VCM_USD_A", 0)))
+                m_vcm_b = Decimal(str(top_month.get("VCM_USD_B", 0)))
+                facts += f"- Month with Largest Variance: {m_date} (Delta: {fmt_usd(m_vcm_b - m_vcm_a)})\n"
+
+            prompt = (
+                "You are a Senior FP&A Professional and Corporate Finance Director. Below is a structured gross margin bridge analysis.\n"
+                "Write a concise, polished executive commentary explaining the variance. Format your output as a list of exactly 4 to 6 bullet points.\n"
+                "Follow these rules strictly:\n"
+                "1. Maintain strict mathematical consistency. Use the exact numbers provided below.\n"
+                "2. Emphasize the primary and secondary drivers clearly.\n"
+                "3. Do not invent any names, metrics, or reasons not provided in the facts.\n"
+                "4. Keep the style professional, clean, and concise, suitable for a board meeting.\n"
+                "5. Do NOT include markdown bold formatting inside the bullet text, keep it clean.\n\n"
+                "FACTS:\n"
+                f"{facts}\n"
+                "COMMENTARY:"
+            )
+
+            # Call Gemini
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            
+            # Parse text into bullets
+            ai_bullets = []
+            for line in text.split("\n"):
+                line = line.strip()
+                if line.startswith("-") or line.startswith("*") or (line and line[0].isdigit() and line[1] in (".", ")")):
+                    # Remove bullet characters
+                    content = line.lstrip("-*0123456789. )").strip()
+                    if content:
+                        ai_bullets.append(content)
+                elif line:
+                    ai_bullets.append(line)
+            
+            if len(ai_bullets) >= 3:
+                # Prepend the marker
+                ai_bullets.insert(0, "[AI-Generated Summary]")
+                return ai_bullets
+        except Exception as e:
+            # Fall back silently to deterministic bullets
+            pass
+
+    return bullets

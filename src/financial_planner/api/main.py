@@ -1,5 +1,4 @@
-"""Main application module for the FastAPI backend server."""
-
+from contextlib import asynccontextmanager
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,10 +7,19 @@ from fastapi.staticfiles import StaticFiles
 from src.financial_planner.api.routes import router as api_router
 from src.financial_planner.data_ingestion.scenario_manager import ensure_baseline_exists
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Ensure baseline scenario is initialized on startup."""
+    ensure_baseline_exists()
+    yield
+
+
 app = FastAPI(
     title="Financial Planner API",
     description="Backend calculation and scenario engine API for the corporate FP&A model.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for frontend local development
@@ -25,12 +33,6 @@ app.add_middleware(
 
 # Register calculation and scenarios API routes
 app.include_router(api_router, prefix="/api")
-
-
-@app.on_event("startup")
-def startup_event():
-    """Ensure baseline scenario is initialized on startup."""
-    ensure_baseline_exists()
 
 
 # Mount compiled static assets from React Vite app in production mode

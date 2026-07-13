@@ -10,3 +10,4 @@ dist/
 data/scenarios/*/
 !data/scenarios/Baseline/
 financial_planner_codebase.zip
+*.log

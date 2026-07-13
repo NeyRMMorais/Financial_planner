@@ -1,5 +1,6 @@
 """FastAPI routes for the financial planner API layer."""
 
+import os
 from io import StringIO
 import io
 import math
@@ -39,7 +40,7 @@ from src.financial_planner.data_ingestion.price_loader import load_pricing_data
 from src.financial_planner.data_ingestion.variable_cost_loader import load_variable_cost_data
 from src.financial_planner.calculations.pricing import PriceOverride, resolve_monthly_prices
 from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
-from src.financial_planner.calculations.bridge import calculate_margin_bridge, summarize_margin_bridge
+from src.financial_planner.calculations.bridge import calculate_margin_bridge, summarize_margin_bridge, generate_bridge_commentary
 from src.financial_planner.api.schemas import BridgeResponse
 
 router = APIRouter()
@@ -716,11 +717,16 @@ def compare_bridge(payload: CompareRequest):
         df_month.sort_values(by="sort_key", inplace=True)
         df_month.drop(columns=["sort_key"], inplace=True)
 
+        by_mat_records = df_to_records(df_mat)
+        by_month_records = df_to_records(df_month)
+        commentary_list = generate_bridge_commentary(summary, by_mat_records, by_month_records)
+
         return {
             "summary": summary,
-            "by_material": df_to_records(df_mat),
-            "by_month": df_to_records(df_month),
+            "by_material": by_mat_records,
+            "by_month": by_month_records,
             "raw_preview": df_to_records(df_bridge),
+            "commentary": commentary_list,
         }
     except HTTPException as e:
         raise e
@@ -840,10 +846,16 @@ def get_file_template(file_type: str):
 @router.get("/admin/login-logs")
 def get_login_logs(email: str):
     """Retrieve user login audit logs. Restricted to administrator."""
-    if email not in ["ney.morais@gmail.com", "ney.morais@outlook.com"]:
+    admin_emails_env = os.getenv("ADMIN_EMAILS", "")
+    if admin_emails_env:
+        authorized_emails = [e.strip() for e in admin_emails_env.split(",") if e.strip()]
+    else:
+        authorized_emails = ["ney.morais@gmail.com", "ney.morais@outlook.com"]
+
+    if email not in authorized_emails:
         raise HTTPException(
             status_code=403,
-            detail="Forbidden: Only Ney Morais is authorized to view audit logs."
+            detail="Forbidden: Unauthorized user email."
         )
     
     log_file = Path("data/login_audit.log")
@@ -1156,10 +1168,45 @@ def export_bridge_pptx(payload: PPTXExportInput):
         p_reg.space_before = Pt(3)
 
         # ── Embed the chart image ──
-        chart_left = Inches(0.3)
-        chart_top = Inches(1.5)
-        chart_width = Inches(12.7)
-        slide.shapes.add_picture(chart_buf, chart_left, chart_top, width=chart_width)
+        if payload.commentary:
+            chart_width = Inches(8.5)
+            slide.shapes.add_picture(chart_buf, Inches(0.3), Inches(1.5), width=chart_width)
+
+            # Add commentary box on the right
+            comm_box = slide.shapes.add_textbox(Inches(9.0), Inches(1.5), Inches(3.8), Inches(5.0))
+            tf_c = comm_box.text_frame
+            tf_c.word_wrap = True
+
+            # Title
+            p_c_title = tf_c.paragraphs[0]
+            p_c_title.text = "BRIDGE DRIVER ANALYSIS"
+            p_c_title.font.size = Pt(11)
+            p_c_title.font.bold = True
+            p_c_title.font.color.rgb = title_rgb
+            p_c_title.font.name = "Segoe UI"
+            p_c_title.space_after = Pt(10)
+
+            # Bullets (excluding source markers and capped at 5)
+            comments_to_render = list(payload.commentary)
+            if comments_to_render and (comments_to_render[0].startswith("[AI") or comments_to_render[0].startswith("[Det")):
+                comments_to_render = comments_to_render[1:]
+
+            comments_to_render = comments_to_render[:5]
+
+            for comment in comments_to_render:
+                clean_comment = comment.replace("**", "")
+                p_bullet = tf_c.add_paragraph()
+                p_bullet.text = f"• {clean_comment}"
+                p_bullet.font.size = Pt(9.5)
+                p_bullet.font.color.rgb = subtitle_rgb
+                p_bullet.font.name = "Segoe UI"
+                p_bullet.space_after = Pt(8)
+                p_bullet.line_spacing = 1.15
+        else:
+            chart_left = Inches(0.3)
+            chart_top = Inches(1.5)
+            chart_width = Inches(12.7)
+            slide.shapes.add_picture(chart_buf, chart_left, chart_top, width=chart_width)
 
         # ── Footer branding ──
         footer_box = slide.shapes.add_textbox(Inches(0.6), Inches(7.0), Inches(5.0), Inches(0.35))

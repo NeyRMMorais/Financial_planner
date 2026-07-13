@@ -279,7 +279,8 @@ def test_export_bridge_pptx():
         "vcm_usd_b": 1300000.0,
         "material_filter": "All Materials",
         "region_filter": "All Regions",
-        "theme": "light"
+        "theme": "light",
+        "commentary": ["[Deterministic Summary]", "Sales grew by **10%**.", "Favorable pricing adjustments."]
     }
     response = client.post("/api/export/bridge-pptx", json=payload)
     assert response.status_code == 200

@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ScenarioCreate(BaseModel):
@@ -28,8 +28,7 @@ class PriceOverrideInput(BaseModel):
     date: str = Field(..., alias="Date", description="Period format, e.g. 2026-01")
     price: Decimal = Field(..., alias="Price")
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class SimulationMetrics(BaseModel):
@@ -93,6 +92,7 @@ class BridgeResponse(BaseModel):
     by_material: List[dict]
     by_month: List[dict]
     raw_preview: List[dict]
+    commentary: List[str]
 
 
 class LoginLogInput(BaseModel):
@@ -113,6 +113,7 @@ class PPTXExportInput(BaseModel):
     material_filter: str
     region_filter: str
     theme: str = "dark"
+    commentary: Optional[List[str]] = None
 
 
 

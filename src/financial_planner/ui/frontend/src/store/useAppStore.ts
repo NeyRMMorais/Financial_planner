@@ -95,6 +95,7 @@ export interface BridgeResult {
   by_material: any[];
   by_month: any[];
   raw_preview: any[];
+  commentary?: string[];
 }
 
 export type FileType =
@@ -175,6 +176,7 @@ interface AppState {
     material_filter: string;
     region_filter: string;
     theme?: string;
+    commentary?: string[];
   }) => Promise<void>;
   validateAndDiffScenarioFile: (fileType: string, file: File) => Promise<{
     status: string;

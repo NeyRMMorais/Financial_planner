@@ -35,41 +35,64 @@ Financial_planner/
 │       ├── mock_price_input.csv   # Customer-specific product pricing
 │       └── mock_volume_input.csv  # 3,000 monthly volume rows for 2026 (77k tons total)
 ├── scripts/                 # Repeatable development utility scripts
-│   └── generate_raw_volume_test_file.py
+│   ├── create_test_scenarios.py
+│   ├── generate_raw_volume_test_file.py
+│   ├── pack_codebase.py
+│   └── wipe_app_data.py
 ├── src/
 │   └── financial_planner/
-│       ├── calculations/    # Volume, price, cost, margin, and scenario calculations
+│       ├── calculations/    # Volume, price, cost, margin, scenario, and bridge calculations
+│       │   ├── bridge.py
 │       │   ├── costs.py
+│       │   ├── margin.py
+│       │   ├── pipeline.py
 │       │   ├── pricing.py
 │       │   └── revenue.py
-│       ├── data_ingestion/  # Raw source loading, validation schemas, and ingestion logs
+│       ├── data_ingestion/  # Raw source loading, validation schemas, and scenario management
 │       │   ├── cost_loader.py
 │       │   ├── data_loader.py
+│       │   ├── distribution_cost_loader.py
+│       │   ├── fx_loader.py
 │       │   ├── price_loader.py
-│       │   └── validation.py
+│       │   ├── scenario_manager.py
+│       │   ├── validation.py
+│       │   └── variable_cost_loader.py
 │       ├── export/          # Structured outputs formatted for SAC
 │       │   └── __init__.py
 │       ├── ui/              # React/Vite + shadcn/ui frontend
 │       │   └── frontend/
 │       │       ├── src/
-│       │       │   ├── App.tsx      # Main application shell
-│       │       │   └── store.ts     # Zustand state management
+│       │       │   ├── components/  # Layout, charts, scenario dashboard widgets
+│       │       │   ├── routes/      # TanStack Router file-based pages
+│       │       │   ├── store/       # Zustand application state management
+│       │       │   ├── styles.css   # Main stylesheet
+│       │       │   ├── main.tsx     # Client entry point
+│       │       │   └── router.tsx   # Router configuration
 │       │       └── package.json
 │       └── api/             # FastAPI backend (REST API + static file server)
 │           ├── main.py
 │           ├── routes.py
 │           └── schemas.py
 ├── tests/                   # PyTest test suite organized by module
+│   ├── api/
+│   │   └── test_routes.py
 │   ├── calculations/
+│   │   ├── test_bridge.py
 │   │   ├── test_cost_calculations.py
+│   │   ├── test_margin.py
+│   │   ├── test_pipeline.py
 │   │   ├── test_pricing_calculations.py
 │   │   └── test_revenue.py
 │   └── data_ingestion/
 │       ├── test_cost_loader.py
 │       ├── test_data_loader.py
+│       ├── test_distribution_cost_loader.py
+│       ├── test_fx_loader.py
 │       ├── test_price_loader.py
-│       └── test_validation.py
-├── pytest.ini               # PyTest configurations (disables cache writes)
+│       ├── test_scenario_manager.py
+│       ├── test_validation.py
+│       └── test_variable_cost_loader.py
+├── pytest.ini               # PyTest configurations
 └── requirements.txt         # Project package dependencies
 ```
 
