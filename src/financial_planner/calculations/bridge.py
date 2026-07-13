@@ -425,7 +425,7 @@ def generate_bridge_commentary(
 
     # 3. AI Generation check
     import os
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("FP_Gemini_Api")
     if api_key:
         try:
             import google.generativeai as genai
