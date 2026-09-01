@@ -100,12 +100,13 @@ Financial_planner/
 
 ## 📊 Project Status & Roadmap
 
-| Phase | Description | Status |
-| :--- | :--- | :--- |
-| **Phase 1: Ingestion & Validation** | Validate 2026 sales volumes, base customer product pricing, monthly plant-specific raw material costs, and cross-dataset grain completeness checks. | **Completed** |
-| **Phase 2: Calculation Engine** | Price propagation overrides, unit costs, Decimal-safe revenue and raw material cost calculation logic. Full FastAPI API layer and React/Vite frontend. | **Completed** |
-| **Phase 3: Scenario & Simulations** | Add UI simulation controls to adjust price/cost trends and run what-if simulations. | *Planned* |
-| **Phase 4: SAC Export Driver** | Export planning results to SAC-compliant CSV/Excel formats. | *Planned* |
+The project is governed by a **3-Phase Strategy** (detailed in [`ROADMAP.md`](file:///c:/Users/Ney/Documents/Financial_planner/ROADMAP.md)):
+
+| Phase | Focus Area | Key Deliverables | Status |
+| :--- | :--- | :--- | :--- |
+| **Phase 1: Executive Standard VCM Prototype** | **Sponsorship Prototype (Current)** | Numeric driver input boxes with top-down atomic cascading, 6-pillar bridge (Pure Volume vs. Mix Effect isolation), scenario change log with VCM impact tracking, AI CFO brief, and 1-click board PowerPoint deck. | **In Progress** |
+| **Phase 2: Full P&L Expansion** | **Operating Income (EBITDA)** | Ingest GL accounts for manufacturing variances (PPV), plant fixed costs, and SG&A down to EBITDA; expand bridge and AI brief to full P&L. | *Planned* |
+| **Phase 3: 12-Month Rolling Horizon & Actuals** | **Continuous Forecasting** | Rolling 12-month horizon (Actuals + Forecast), 3-way comparisons (Actuals vs Budget vs Forecast), and SAC dimensional export drivers. | *Planned* |
 
 ---
 

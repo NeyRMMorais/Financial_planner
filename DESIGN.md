@@ -54,3 +54,10 @@ All colors are configured for light and dark modes, utilizing a layered containe
   * `box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08)`
 * **Top Highlight Border:**
   * Use a subtle top highlight (`border-t border-t-white/10` in dark mode) to simulate physical light hitting the container's top edge.
+
+## Form Controls & Scenario Drivers
+* **Numeric Input Boxes over Sliders:** For financial modeling and assumption adjustments, avoid imprecise slider bars. Use clean, compact numeric input boxes with distinct prefix/suffix tags (`%`, `$/MT`, `€`, `$`) and clear step increments.
+* **Dual-View UX Hierarchy:**
+  * **Executive Cockpit (Flight Simulator):** Macro/commercial driver input boxes, real-time reactive waterfall bridge, Change Log timeline, and AI CFO brief.
+  * **Planner Workspace:** Dense Excel-like data grids, raw CSV uploads, and atomic-level diffing tables.
+

@@ -209,7 +209,11 @@ def test_bridge_full_reconciliation(mock_fx_rates, mock_fx_rates_b, keys) -> Non
     assert summary["vcm_usd_a"] + summary["volume_effect"] + summary["price_effect"] + summary["cost_effect"] + summary["fx_effect"] == summary["vcm_usd_b"]
 
 
-def test_generate_bridge_commentary_deterministic() -> None:
+def test_generate_bridge_commentary_deterministic(monkeypatch) -> None:
+    # Clear any Gemini environment variables to force the deterministic path
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("FP_Gemini_Api", raising=False)
+    
     from src.financial_planner.calculations.bridge import generate_bridge_commentary
     
     summary = {

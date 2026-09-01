@@ -5,10 +5,11 @@
 product
 
 ## Users
-FP&A (Financial Planning & Analysis) and Corporate Finance managers. They operate on standard desktop monitors, often running our application side-by-side with Microsoft Excel or SAP. They require high data density, clear visual structure, and highly readable numbers to perform monthly volume-to-margin planning and scenario simulation.
+1. **C-Level Executives (CFO, Business Unit Leaders):** Operate in the **Executive Cockpit (Flight Simulator)** to test macro shocks (feedstock, FX, commercial pricing pass-through), review real-time waterfall bridges (isolating Pure Volume vs. Mix effects), and consume AI CFO Briefs and 1-click PowerPoint decks for board meetings.
+2. **FP&A Managers & Corporate Finance Controllers:** Operate in the **Planner Workspace** alongside Microsoft Excel and SAP. They require high data density, granular tables, auditable change logs, and atomic-level driver adjustments to manage monthly rolling forecasts and budgets.
 
 ## Product Purpose
-To manage, simulate, and export monthly volume-to-margin plans for the 2026 calendar year. The application ingests sales volumes, applies exchange rates, price lists, and raw material costs, runs simulations, preserves version-controlled scenarios with detailed change logs, and exports structured datasets to upstream planning engines like SAP Analytics Cloud. Success means zero calculation latency, precise scenario comparisons, and highly efficient data entry.
+To manage, simulate, and bridge monthly financial plans for a chemical manufacturing business (9 products across 3 product lines) across a 12-month rolling horizon (2026 baseline). The application ingests volumes, pricing, raw material BOMs, and GL account expenses, cascades top-down assumptions to the atomic grain, reconciles volume/mix/price/cost/FX movements, maintains an auditable financial impact change log, and exports structured datasets to SAP Analytics Cloud. Success means sub-second calculation latency, zero floating-point math errors, and effortless C-suite executive decision-making.
 
 ## Brand Personality
 Modern, polished, and highly structured corporate productivity. Emulates the shadcn/ui design language with clean layout, physical grounding, subtle depth, and clear container hierarchies.
