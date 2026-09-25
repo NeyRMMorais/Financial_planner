@@ -42,6 +42,7 @@ from src.financial_planner.calculations.pricing import PriceOverride, resolve_mo
 from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
 from src.financial_planner.calculations.bridge import calculate_margin_bridge, summarize_margin_bridge, generate_bridge_commentary
 from src.financial_planner.api.schemas import BridgeResponse
+from src.financial_planner.paths import LOGIN_AUDIT_LOG
 
 router = APIRouter()
 
@@ -741,9 +742,8 @@ def log_user_login(payload: LoginLogInput):
         import datetime
         from pathlib import Path
         
-        log_dir = Path("data")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / "login_audit.log"
+        log_file = LOGIN_AUDIT_LOG
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_line = f"[{timestamp}] User: {payload.name} ({payload.email}) signed in via {payload.provider}\n"
@@ -858,7 +858,7 @@ def get_login_logs(email: str):
             detail="Forbidden: Unauthorized user email."
         )
     
-    log_file = Path("data/login_audit.log")
+    log_file = LOGIN_AUDIT_LOG
     if not log_file.exists():
         return []
         
