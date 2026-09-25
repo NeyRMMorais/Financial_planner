@@ -428,8 +428,8 @@ def generate_bridge_commentary(
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("FP_Gemini_Api")
     if api_key:
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
+            from google import genai
+            client = genai.Client(api_key=api_key)
             
             # Prepare details for prompt
             facts = (
@@ -472,8 +472,9 @@ def generate_bridge_commentary(
 
             # Call Gemini
             model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model=model_name, contents=prompt
+            )
             text = response.text.strip()
             
             # Parse text into bullets

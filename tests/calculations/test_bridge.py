@@ -269,29 +269,32 @@ def test_generate_bridge_commentary_ai(monkeypatch) -> None:
     # Mock GEMINI_API_KEY
     monkeypatch.setenv("GEMINI_API_KEY", "mock_key")
     
-    # Mock the GenerativeModel class and configure/generate_content call
+    # Mock the google-genai client so no network call is made
     class MockResponse:
         text = "- AI summary bullet 1\n- AI summary bullet 2\n- AI summary bullet 3"
-        
-    class MockModel:
-        def __init__(self, name):
-            pass
-        def generate_content(self, prompt):
+
+    class MockModels:
+        def generate_content(self, model, contents):
             return MockResponse()
-            
+
+    class MockClient:
+        def __init__(self, api_key=None, **kwargs):
+            self.models = MockModels()
+
     import sys
-    # Create mock package for google.generativeai if needed, or if it is already installed, mock its class
     try:
-        import google.generativeai as genai
-        monkeypatch.setattr(genai, "GenerativeModel", MockModel)
-        monkeypatch.setattr(genai, "configure", lambda api_key: None)
+        from google import genai
+        monkeypatch.setattr(genai, "Client", MockClient)
     except ImportError:
-        # If not installed, create a mock module in sys.modules
+        # If the SDK is not installed, stand in a mock module
         import types
-        mock_genai = types.ModuleType("google.generativeai")
-        mock_genai.GenerativeModel = MockModel
-        mock_genai.configure = lambda api_key: None
-        sys.modules["google.generativeai"] = mock_genai
+        google_pkg = sys.modules.get("google") or types.ModuleType("google")
+        google_pkg.__path__ = getattr(google_pkg, "__path__", [])
+        mock_genai = types.ModuleType("google.genai")
+        mock_genai.Client = MockClient
+        google_pkg.genai = mock_genai
+        sys.modules["google"] = google_pkg
+        sys.modules["google.genai"] = mock_genai
         
     summary = {
         "vcm_usd_a": Decimal("2500000.00"),

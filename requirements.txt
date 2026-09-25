@@ -8,5 +8,5 @@ openpyxl
 python-pptx
 matplotlib
 python-dotenv
-google-generativeai
+google-genai
 
