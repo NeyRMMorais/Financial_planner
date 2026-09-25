@@ -20,10 +20,8 @@ from src.financial_planner.data_ingestion.distribution_cost_loader import load_d
 from src.financial_planner.data_ingestion.fx_loader import load_fx_data, load_plant_currency_data
 from src.financial_planner.data_ingestion.price_loader import load_pricing_data
 from src.financial_planner.data_ingestion.variable_cost_loader import load_variable_cost_data
+from src.financial_planner.paths import RAW_DIR, SCENARIOS_DIR
 
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
-SCENARIOS_DIR: Final[Path] = PROJECT_ROOT / "data" / "scenarios"
-RAW_DIR: Final[Path] = PROJECT_ROOT / "data" / "raw"
 
 # Mappings of filenames inside a scenario directory
 FILE_MAP: Final[dict[str, str]] = {

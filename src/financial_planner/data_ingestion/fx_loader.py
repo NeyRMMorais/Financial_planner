@@ -15,11 +15,11 @@ from src.financial_planner.data_ingestion.validation import (
     run_fx_validation,
     run_plant_currency_validation,
 )
+from src.financial_planner.paths import RAW_DIR
 
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
-DEFAULT_RAW_FX_FILE: Final[Path] = PROJECT_ROOT / "data" / "raw" / "mock_fx_rates.csv"
+DEFAULT_RAW_FX_FILE: Final[Path] = RAW_DIR / "mock_fx_rates.csv"
 DEFAULT_RAW_PLANT_CURRENCY_FILE: Final[Path] = (
-    PROJECT_ROOT / "data" / "raw" / "mock_plant_currency_mapping.csv"
+    RAW_DIR / "mock_plant_currency_mapping.csv"
 )
 
 

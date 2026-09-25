@@ -18,6 +18,7 @@ from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     run_advanced_validation,
 )
+from src.financial_planner.paths import RAW_DIR
 
 
 PLANNING_VOLUME_COLUMNS: Final[list[str]] = [
@@ -32,8 +33,7 @@ PLANNING_VOLUME_COLUMNS: Final[list[str]] = [
     "Volume",
 ]
 
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
-DEFAULT_RAW_VOLUME_FILE: Final[Path] = PROJECT_ROOT / "data" / "raw" / "mock_volume_input.csv"
+DEFAULT_RAW_VOLUME_FILE: Final[Path] = RAW_DIR / "mock_volume_input.csv"
 
 
 def create_mock_volume_dataset() -> pd.DataFrame:

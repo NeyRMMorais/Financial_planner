@@ -17,9 +17,9 @@ from src.financial_planner.data_ingestion.validation import (
     PlanningValidationError,
     run_variable_cost_validation,
 )
+from src.financial_planner.paths import RAW_DIR
 
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
-DEFAULT_RAW_VAR_COST_FILE: Final[Path] = PROJECT_ROOT / "data" / "raw" / "mock_variable_cost_input.csv"
+DEFAULT_RAW_VAR_COST_FILE: Final[Path] = RAW_DIR / "mock_variable_cost_input.csv"
 
 
 def load_variable_cost_data(
