@@ -1,5 +1,6 @@
 pandas
 pytest
+httpx2
 fastapi
 uvicorn
 python-multipart
