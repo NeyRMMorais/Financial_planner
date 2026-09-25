@@ -1,0 +1,23 @@
+# Normalize line endings so Windows, macOS and Linux checkouts agree.
+# Without this, core.autocrlf on Windows produces phantom diffs on generated
+# files (notably routeTree.gen.ts) after every frontend build.
+* text=auto eol=lf
+
+# Windows-only tooling that requires CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never convert, never diff as text
+*.png binary
+*.PNG binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
+*.xlsm binary
+*.pptx binary
+*.docx binary
+
+# Generated sources: collapse in diffs and exclude from language stats
+src/financial_planner/ui/frontend/src/routeTree.gen.ts linguist-generated=true
