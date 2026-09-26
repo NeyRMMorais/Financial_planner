@@ -80,7 +80,9 @@ class ScenarioDifference(BaseModel):
 
 class BridgeSummary(BaseModel):
     vcm_usd_a: Decimal
-    volume_effect: Decimal
+    pure_volume_effect: Decimal = Decimal("0.00")
+    mix_effect: Decimal = Decimal("0.00")
+    volume_effect: Decimal = Decimal("0.00")
     price_effect: Decimal
     cost_effect: Decimal
     fx_effect: Decimal
@@ -89,10 +91,45 @@ class BridgeSummary(BaseModel):
 
 class BridgeResponse(BaseModel):
     summary: BridgeSummary
+    by_product_line: Optional[List[dict]] = None
     by_material: List[dict]
     by_month: List[dict]
     raw_preview: List[dict]
     commentary: List[str]
+
+
+class DriverAdjustment(BaseModel):
+    driver_type: str = Field(..., description="volume, price, raw_cost, var_cost, dist_cost, fx_rate")
+    scope_type: str = Field("portfolio", description="portfolio, product_line, material, customer")
+    scope_value: Optional[str] = Field(None, description="e.g. 'Line 1 - Performance Specialties' or 'MAT-1001' or 'EUR'")
+    adjustment_type: str = Field("pct", description="pct (e.g. 5.0 for +5%), delta (e.g. 10.0 for +$10/MT), or absolute (for FX, e.g. 1.08)")
+    value: Decimal = Field(..., description="Numeric value of the adjustment")
+
+
+class ApplyDriversRequest(BaseModel):
+    adjustments: List[DriverAdjustment]
+    description: Optional[str] = Field(None, description="Optional custom note describing the change")
+    author: Optional[str] = Field("User", description="User name or email")
+
+
+class ChangeLogItem(BaseModel):
+    id: str
+    timestamp: str
+    author: str
+    driver: str
+    description: str
+    scope: dict
+    vcm_before_usd: Decimal
+    vcm_after_usd: Decimal
+    impact_usd: Decimal
+    impact_pct: str
+
+
+class ApplyDriversResponse(BaseModel):
+    scenario: str
+    applied_count: int
+    change_log_entry: dict
+    new_metrics: SimulationMetrics
 
 
 class LoginLogInput(BaseModel):
@@ -105,6 +142,8 @@ class PPTXExportInput(BaseModel):
     scenario_a: str
     scenario_b: str
     vcm_usd_a: Decimal
+    pure_volume_effect: Optional[Decimal] = None
+    mix_effect: Optional[Decimal] = None
     volume_effect: Decimal
     price_effect: Decimal
     cost_effect: Decimal

@@ -1,6 +1,7 @@
 """FastAPI routes for the financial planner API layer."""
 
 import os
+import json
 from io import StringIO
 import io
 import math
@@ -21,6 +22,9 @@ from src.financial_planner.api.schemas import (
     ScenarioDifference,
     LoginLogInput,
     PPTXExportInput,
+    BridgeResponse,
+    ApplyDriversRequest,
+    ApplyDriversResponse,
 )
 from src.financial_planner.data_ingestion.scenario_manager import (
     list_scenarios,
@@ -29,6 +33,7 @@ from src.financial_planner.data_ingestion.scenario_manager import (
     save_scenario_data,
     diff_scenarios_inputs,
     diff_dataframe,
+    apply_scenario_drivers,
     SCENARIOS_DIR,
     FILE_MAP,
 )
@@ -40,8 +45,12 @@ from src.financial_planner.data_ingestion.price_loader import load_pricing_data
 from src.financial_planner.data_ingestion.variable_cost_loader import load_variable_cost_data
 from src.financial_planner.calculations.pricing import PriceOverride, resolve_monthly_prices
 from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
-from src.financial_planner.calculations.bridge import calculate_margin_bridge, summarize_margin_bridge, generate_bridge_commentary
-from src.financial_planner.api.schemas import BridgeResponse
+from src.financial_planner.calculations.bridge import (
+    calculate_margin_bridge,
+    summarize_margin_bridge,
+    summarize_by_product_line,
+    generate_bridge_commentary,
+)
 from src.financial_planner.paths import LOGIN_AUDIT_LOG
 
 router = APIRouter()
@@ -720,10 +729,12 @@ def compare_bridge(payload: CompareRequest):
 
         by_mat_records = df_to_records(df_mat)
         by_month_records = df_to_records(df_month)
-        commentary_list = generate_bridge_commentary(summary, by_mat_records, by_month_records)
+        by_pline_records = summarize_by_product_line(df_bridge)
+        commentary_list = generate_bridge_commentary(summary, by_mat_records, by_month_records, by_pline_records)
 
         return {
             "summary": summary,
+            "by_product_line": by_pline_records,
             "by_material": by_mat_records,
             "by_month": by_month_records,
             "raw_preview": df_to_records(df_bridge),
@@ -733,6 +744,44 @@ def compare_bridge(payload: CompareRequest):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bridge calculation failed: {str(e)}")
+
+
+@router.post("/scenarios/{name}/apply-drivers", response_model=ApplyDriversResponse)
+def apply_drivers_to_scenario(name: str, payload: ApplyDriversRequest):
+    """Apply macro and commercial driver input adjustments with top-down atomic cascading."""
+    try:
+        adjustments_dict = [adj.model_dump() for adj in payload.adjustments]
+        result = apply_scenario_drivers(
+            name=name,
+            adjustments=adjustments_dict,
+            description=payload.description,
+            author=payload.author or "User",
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to apply drivers: {str(e)}")
+
+
+@router.get("/scenarios/{name}/change-log")
+def get_scenario_change_log(name: str):
+    """Retrieve full audit and impact trail for a scenario."""
+    scen_dir = SCENARIOS_DIR / name
+    meta_path = scen_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail=f"Scenario '{name}' not found.")
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        return {
+            "name": name,
+            "change_log": meta.get("change_log", []),
+            "impact_trail": meta.get("impact_trail", []),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/login-log")
@@ -936,39 +985,64 @@ def export_bridge_pptx(payload: PPTXExportInput):
 
         # ── Data preparation ──
         base = float(payload.vcm_usd_a)
-        vol = float(payload.volume_effect)
         price = float(payload.price_effect)
         cost = float(payload.cost_effect)
         fx = float(payload.fx_effect)
         target = float(payload.vcm_usd_b)
 
-        labels = [
-            payload.scenario_a,
-            "Volume\nEffect",
-            "Price\nEffect",
-            "Cost\nEffect",
-            "FX\nEffect",
-            payload.scenario_b,
-        ]
+        if payload.pure_volume_effect is not None and payload.mix_effect is not None:
+            pure_vol = float(payload.pure_volume_effect)
+            mix = float(payload.mix_effect)
+            labels = [
+                payload.scenario_a,
+                "Pure Volume\nEffect",
+                "Product Mix\nEffect",
+                "Price\nEffect",
+                "Cost/PPV\nEffect",
+                "FX\nEffect",
+                payload.scenario_b,
+            ]
+            step1 = base
+            step2 = step1 + pure_vol
+            step3 = step2 + mix
+            step4 = step3 + price
+            step5 = step4 + cost
+            step6 = step5 + fx
+            steps = [
+                {"bottom": 0, "height": base, "change": base, "type": "base"},
+                {"bottom": min(step1, step2), "height": abs(pure_vol), "change": pure_vol, "type": "var"},
+                {"bottom": min(step2, step3), "height": abs(mix), "change": mix, "type": "var"},
+                {"bottom": min(step3, step4), "height": abs(price), "change": price, "type": "var"},
+                {"bottom": min(step4, step5), "height": abs(cost), "change": cost, "type": "var"},
+                {"bottom": min(step5, step6), "height": abs(fx), "change": fx, "type": "var"},
+                {"bottom": 0, "height": target, "change": target, "type": "target"},
+            ]
+            end_values = [base, step2, step3, step4, step5, step6]
+        else:
+            vol = float(payload.volume_effect)
+            labels = [
+                payload.scenario_a,
+                "Volume\nEffect",
+                "Price\nEffect",
+                "Cost\nEffect",
+                "FX\nEffect",
+                payload.scenario_b,
+            ]
+            step1 = base
+            step2 = step1 + vol
+            step3 = step2 + price
+            step4 = step3 + cost
+            step5 = step4 + fx
+            steps = [
+                {"bottom": 0, "height": base, "change": base, "type": "base"},
+                {"bottom": min(step1, step2), "height": abs(vol), "change": vol, "type": "var"},
+                {"bottom": min(step2, step3), "height": abs(price), "change": price, "type": "var"},
+                {"bottom": min(step3, step4), "height": abs(cost), "change": cost, "type": "var"},
+                {"bottom": min(step4, step5), "height": abs(fx), "change": fx, "type": "var"},
+                {"bottom": 0, "height": target, "change": target, "type": "target"},
+            ]
+            end_values = [base, step2, step3, step4, step5]
 
-        # Running cumulative positions
-        step1 = base
-        step2 = step1 + vol
-        step3 = step2 + price
-        step4 = step3 + cost
-        step5 = step4 + fx
-
-        steps = [
-            {"bottom": 0, "height": base, "change": base, "type": "base"},
-            {"bottom": min(step1, step2), "height": abs(vol), "change": vol, "type": "var"},
-            {"bottom": min(step2, step3), "height": abs(price), "change": price, "type": "var"},
-            {"bottom": min(step3, step4), "height": abs(cost), "change": cost, "type": "var"},
-            {"bottom": min(step4, step5), "height": abs(fx), "change": fx, "type": "var"},
-            {"bottom": 0, "height": target, "change": target, "type": "target"},
-        ]
-
-        # Connection line y-values (the "end" of each bar, before the next)
-        end_values = [base, step2, step3, step4, step5]
 
         # ── Currency formatter ──
         def fmt_curr(val: float) -> str:

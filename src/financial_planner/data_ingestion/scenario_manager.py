@@ -387,3 +387,282 @@ def diff_scenarios_inputs(scenario_base: str, scenario_new: str) -> list[str]:
         logs.append("No changes detected in any input files.")
 
     return logs
+
+
+def apply_scenario_drivers(
+    name: str,
+    adjustments: list[dict],
+    description: str | None = None,
+    author: str = "User",
+) -> dict:
+    """Apply macro and commercial driver adjustments to a scenario with top-down atomic cascading.
+
+    Args:
+        name: Target scenario name.
+        adjustments: List of adjustments with keys 'driver_type', 'scope_type', 'scope_value', 'adjustment_type', 'value'.
+        description: Optional user note.
+        author: User name or email.
+
+    Returns:
+        dict containing the applied result, new metrics, and structured change log entry.
+    """
+    import uuid
+    from src.financial_planner.calculations.bridge import get_product_line
+    from src.financial_planner.calculations.pipeline import run_simulation_pipeline, generate_summary_metrics
+
+    scen_dir = SCENARIOS_DIR / name
+    if not scen_dir.exists():
+        raise ValueError(f"Scenario '{name}' does not exist.")
+
+    # 1. Load initial scenario data and compute baseline VCM
+    data = load_scenario_data(name)
+    try:
+        from src.financial_planner.calculations.pricing import PriceOverride, resolve_monthly_prices
+        over_list = [PriceOverride(item["Material ID"], item["Sold to ID"], item["Ship to ID"], item["Date"], item["Price"]) for item in data.get("price_overrides", [])]
+        prices_res = resolve_monthly_prices(data["base_prices"], over_list)
+        init_calc = run_simulation_pipeline(
+            data["volume_data"],
+            prices_res,
+            data["base_costs"],
+            data["base_var_costs"],
+            data["base_dist_costs"],
+            data["plant_currency"],
+            data["fx_rates"],
+        )
+        init_metrics = generate_summary_metrics(init_calc)
+        vcm_before_usd = init_metrics["total_vcm_usd"]
+    except Exception:
+        vcm_before_usd = Decimal("0.00")
+
+    # 2. Iterate and apply each adjustment to the atomic datasets
+    applied_descriptions = []
+    primary_driver = "Multi-Driver"
+
+    for adj in adjustments:
+        driver_type = str(adj.get("driver_type", "")).lower().strip()
+        scope_type = str(adj.get("scope_type", "portfolio")).lower().strip()
+        scope_val = adj.get("scope_value")
+        scope_val_str = str(scope_val).strip() if scope_val is not None else ""
+        adj_type = str(adj.get("adjustment_type", "pct")).lower().strip()
+        val = Decimal(str(adj.get("value", "0.0")))
+
+        # --- A. VOLUME DRIVER ---
+        if driver_type == "volume" and data["volume_data"] is not None:
+            primary_driver = "Volume"
+            df = data["volume_data"].copy()
+
+            def match_vol(row):
+                if scope_type == "product_line":
+                    return get_product_line(row.get("Material ID"), row.get("Material")) == scope_val_str
+                elif scope_type == "material":
+                    return str(row.get("Material ID", "")).strip() == scope_val_str or str(row.get("Material", "")).strip() == scope_val_str
+                elif scope_type == "customer":
+                    return str(row.get("Sold to ID", "")).strip() == scope_val_str or str(row.get("Sold to", "")).strip() == scope_val_str
+                elif scope_type == "plant":
+                    return str(row.get("Plant", "")).strip() == scope_val_str
+                return True  # portfolio
+
+            mask = df.apply(match_vol, axis=1)
+            if adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Volume"] = df.loc[mask, "Volume"].apply(lambda v: max(Decimal("0.000"), Decimal(str(v)) * multiplier))
+                applied_descriptions.append(f"Volume {val:+}% on {scope_type} ({scope_val_str or 'All'})")
+            elif adj_type == "delta":
+                df.loc[mask, "Volume"] = df.loc[mask, "Volume"].apply(lambda v: max(Decimal("0.000"), Decimal(str(v)) + val))
+                applied_descriptions.append(f"Volume {val:+} MT on {scope_type} ({scope_val_str or 'All'})")
+
+            data["volume_data"] = df
+
+        # --- B. PRICE DRIVER ---
+        elif driver_type == "price" and data["base_prices"] is not None:
+            primary_driver = "Price"
+            df = data["base_prices"].copy()
+
+            def match_price(row):
+                if scope_type == "product_line":
+                    return get_product_line(row.get("Material ID"), "") == scope_val_str
+                elif scope_type == "material":
+                    return str(row.get("Material ID", "")).strip() == scope_val_str
+                elif scope_type == "customer":
+                    return str(row.get("Sold to ID", "")).strip() == scope_val_str
+                return True
+
+            mask = df.apply(match_price, axis=1)
+            if adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Price"] = df.loc[mask, "Price"].apply(lambda p: max(Decimal("0.00"), Decimal(str(p)) * multiplier))
+                applied_descriptions.append(f"Price {val:+}% on {scope_type} ({scope_val_str or 'All'})")
+            elif adj_type == "delta":
+                df.loc[mask, "Price"] = df.loc[mask, "Price"].apply(lambda p: max(Decimal("0.00"), Decimal(str(p)) + val))
+                applied_descriptions.append(f"Price {val:+} on {scope_type} ({scope_val_str or 'All'})")
+
+            data["base_prices"] = df
+
+        # --- C. RAW MATERIAL COST DRIVER ---
+        elif driver_type in ("raw_cost", "raw_material_cost", "feedstock") and data["base_costs"] is not None:
+            primary_driver = "Raw Material Cost"
+            df = data["base_costs"].copy()
+
+            def match_cost(row):
+                if scope_type == "product_line":
+                    return get_product_line(row.get("Material ID"), "") == scope_val_str
+                elif scope_type == "material":
+                    return str(row.get("Material ID", "")).strip() == scope_val_str
+                elif scope_type == "plant":
+                    return str(row.get("Plant", "")).strip() == scope_val_str
+                return True
+
+            mask = df.apply(match_cost, axis=1)
+            if adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Cost"] = df.loc[mask, "Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) * multiplier))
+                applied_descriptions.append(f"Raw Mat Cost {val:+}% on {scope_type} ({scope_val_str or 'All'})")
+            elif adj_type == "delta":
+                df.loc[mask, "Cost"] = df.loc[mask, "Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) + val))
+                applied_descriptions.append(f"Raw Mat Cost {val:+} on {scope_type} ({scope_val_str or 'All'})")
+
+            data["base_costs"] = df
+
+        # --- D. VARIABLE NON-RAW COST DRIVER ---
+        elif driver_type in ("var_cost", "variable_cost") and data["base_var_costs"] is not None:
+            primary_driver = "Variable Cost"
+            df = data["base_var_costs"].copy()
+
+            def match_var(row):
+                if scope_type == "product_line":
+                    return get_product_line(row.get("Material ID"), row.get("Material")) == scope_val_str
+                elif scope_type == "material":
+                    return str(row.get("Material ID", "")).strip() == scope_val_str or str(row.get("Material", "")).strip() == scope_val_str
+                return True
+
+            mask = df.apply(match_var, axis=1)
+            if adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Variable Cost"] = df.loc[mask, "Variable Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) * multiplier))
+                applied_descriptions.append(f"Variable Cost {val:+}% on {scope_type} ({scope_val_str or 'All'})")
+            elif adj_type == "delta":
+                df.loc[mask, "Variable Cost"] = df.loc[mask, "Variable Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) + val))
+                applied_descriptions.append(f"Variable Cost {val:+} on {scope_type} ({scope_val_str or 'All'})")
+
+            data["base_var_costs"] = df
+
+        # --- E. DISTRIBUTION COST DRIVER ---
+        elif driver_type in ("dist_cost", "distribution_cost", "freight") and data["base_dist_costs"] is not None:
+            primary_driver = "Distribution Cost"
+            df = data["base_dist_costs"].copy()
+
+            def match_dist(row):
+                if scope_type == "customer":
+                    return scope_val_str in str(row.get("Ship to ID", "")) or scope_val_str in str(row.get("Ship to", ""))
+                return True
+
+            mask = df.apply(match_dist, axis=1)
+            if adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Distribution Cost"] = df.loc[mask, "Distribution Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) * multiplier))
+                applied_descriptions.append(f"Distribution Cost {val:+}% on {scope_type} ({scope_val_str or 'All'})")
+            elif adj_type == "delta":
+                df.loc[mask, "Distribution Cost"] = df.loc[mask, "Distribution Cost"].apply(lambda c: max(Decimal("0.00"), Decimal(str(c)) + val))
+                applied_descriptions.append(f"Distribution Cost {val:+} on {scope_type} ({scope_val_str or 'All'})")
+
+            data["base_dist_costs"] = df
+
+        # --- F. FX RATE DRIVER ---
+        elif driver_type in ("fx_rate", "fx") and data["fx_rates"] is not None:
+            primary_driver = "FX Rate"
+            df = data["fx_rates"].copy()
+
+            def match_fx(row):
+                if scope_val_str:
+                    return str(row.get("Currency", "")).strip().upper() == scope_val_str.upper()
+                return True
+
+            mask = df.apply(match_fx, axis=1)
+            if adj_type == "absolute":
+                df.loc[mask, "Rate"] = val
+                applied_descriptions.append(f"FX Rate {scope_val_str} set to {val}")
+            elif adj_type == "pct":
+                multiplier = Decimal("1.0") + (val / Decimal("100.0"))
+                df.loc[mask, "Rate"] = df.loc[mask, "Rate"].apply(lambda r: Decimal(str(r)) * multiplier)
+                applied_descriptions.append(f"FX Rate {scope_val_str} {val:+}%")
+
+            data["fx_rates"] = df
+
+    # 3. Save all modified datasets back to disk
+    save_scenario_data(name, data)
+
+    # 4. Re-calculate new metrics to determine exact financial impact
+    from src.financial_planner.calculations.pricing import PriceOverride, resolve_monthly_prices
+    over_list = [PriceOverride(item["Material ID"], item["Sold to ID"], item["Ship to ID"], item["Date"], item["Price"]) for item in data.get("price_overrides", [])]
+    prices_res = resolve_monthly_prices(data["base_prices"], over_list)
+    new_calc = run_simulation_pipeline(
+        data["volume_data"],
+        prices_res,
+        data["base_costs"],
+        data["base_var_costs"],
+        data["base_dist_costs"],
+        data["plant_currency"],
+        data["fx_rates"],
+    )
+    new_metrics = generate_summary_metrics(new_calc)
+    vcm_after_usd = new_metrics["total_vcm_usd"]
+
+    impact_usd = vcm_after_usd - vcm_before_usd
+    impact_pct = ((impact_usd / vcm_before_usd) * Decimal("100.0")) if vcm_before_usd != Decimal("0.00") else Decimal("0.00")
+
+    # 5. Build structured change log entry
+    summary_desc = description or "; ".join(applied_descriptions) or "Macro driver adjustment applied"
+    serialized_adjustments = []
+    for adj in adjustments:
+        serialized_adjustments.append({
+            "driver_type": adj.get("driver_type"),
+            "scope_type": adj.get("scope_type"),
+            "scope_value": adj.get("scope_value"),
+            "adjustment_type": adj.get("adjustment_type"),
+            "value": float(adj["value"]) if isinstance(adj.get("value"), Decimal) else adj.get("value"),
+        })
+
+    entry = {
+        "id": str(uuid.uuid4())[:8],
+        "timestamp": datetime.now().isoformat(),
+        "author": author,
+        "driver": primary_driver,
+        "description": summary_desc,
+        "scope": {"adjustments": serialized_adjustments},
+        "vcm_before_usd": str(vcm_before_usd),
+        "vcm_after_usd": str(vcm_after_usd),
+        "impact_usd": str(impact_usd),
+        "impact_pct": f"{impact_pct:+.2f}%",
+    }
+
+    # 6. Update metadata.json with structured impact trail
+    meta_path = scen_dir / "metadata.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+    else:
+        meta = {}
+
+    if "impact_trail" not in meta:
+        meta["impact_trail"] = []
+    meta["impact_trail"].insert(0, entry)
+
+    # Also prepend human-readable bullet to change_log
+    log_bullet = f"[{entry['timestamp'][:10]}] {summary_desc} -> Impact: {impact_usd:+,.2f} USD ({impact_pct:+.2f}%)"
+    if "change_log" not in meta or not isinstance(meta["change_log"], list):
+        meta["change_log"] = []
+    meta["change_log"].insert(0, log_bullet)
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, default=str)
+
+    return {
+        "scenario": name,
+        "applied_count": len(adjustments),
+        "change_log_entry": entry,
+        "new_metrics": new_metrics,
+    }
+

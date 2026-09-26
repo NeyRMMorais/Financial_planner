@@ -293,6 +293,78 @@ def test_export_bridge_pptx():
     assert len(response_dark.content) > 0
 
 
+def test_apply_drivers_endpoint():
+    """Test applying macro and commercial driver adjustments via API."""
+    # Create test scenario
+    client.post("/api/scenarios", json={"name": "TestDriverApi", "base_scenario": "Baseline", "description": "Test"})
+
+    payload = {
+        "adjustments": [
+            {
+                "driver_type": "price",
+                "scope_type": "product_line",
+                "scope_value": "Line 1 - Performance Specialties",
+                "adjustment_type": "pct",
+                "value": 5.0,
+            },
+            {
+                "driver_type": "volume",
+                "scope_type": "portfolio",
+                "scope_value": None,
+                "adjustment_type": "pct",
+                "value": 3.0,
+            }
+        ],
+        "description": "Executive Scenario A: +5% price Line 1, +3% total volume",
+        "author": "CFO Tester"
+    }
+    
+    resp = client.post("/api/scenarios/TestDriverApi/apply-drivers", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["scenario"] == "TestDriverApi"
+    assert data["applied_count"] == 2
+    assert "change_log_entry" in data
+    assert data["change_log_entry"]["author"] == "CFO Tester"
+    assert "new_metrics" in data
+
+    # Test retrieving change log
+    cl_resp = client.get("/api/scenarios/TestDriverApi/change-log")
+    assert cl_resp.status_code == 200
+    cl_data = cl_resp.json()
+    assert len(cl_data["impact_trail"]) >= 1
+    assert cl_data["impact_trail"][0]["author"] == "CFO Tester"
+
+    # Clean up
+    import shutil
+    target_dir = SCENARIOS_DIR / "TestDriverApi"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+
+
+def test_compare_bridge_with_mix_and_product_lines():
+    """Test compare bridge endpoint returns 6 pillars and product line breakdowns."""
+    # Create clone
+    client.post("/api/scenarios", json={"name": "TestBridgeApi", "base_scenario": "Baseline", "description": "Test"})
+    
+    resp = client.post("/api/compare/bridge", json={"scenario_a": "Baseline", "scenario_b": "TestBridgeApi"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "summary" in data
+    assert "pure_volume_effect" in data["summary"]
+    assert "mix_effect" in data["summary"]
+    assert "by_product_line" in data
+    assert len(data["by_product_line"]) >= 1
+    assert "commentary" in data
+
+    # Clean up
+    import shutil
+    target_dir = SCENARIOS_DIR / "TestBridgeApi"
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+
+
+
 
 
 

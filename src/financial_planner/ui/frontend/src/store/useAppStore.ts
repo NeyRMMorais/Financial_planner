@@ -83,6 +83,8 @@ export interface CompareResult {
 
 export interface BridgeSummary {
   vcm_usd_a: number;
+  pure_volume_effect?: number;
+  mix_effect?: number;
   volume_effect: number;
   price_effect: number;
   cost_effect: number;
@@ -90,8 +92,41 @@ export interface BridgeSummary {
   vcm_usd_b: number;
 }
 
+export interface ProductLineBridge {
+  product_line: string;
+  volume_a: number;
+  volume_b: number;
+  volume_delta: number;
+  volume_growth_pct: number;
+  vcm_usd_a: number;
+  vcm_usd_b: number;
+  vcm_delta_usd: number;
+  pure_volume_effect: number;
+  mix_effect: number;
+  volume_effect: number;
+  price_effect: number;
+  cost_effect: number;
+  fx_effect: number;
+  unit_vcm_usd_a: number;
+  unit_vcm_usd_b: number;
+}
+
+export interface ImpactTrailItem {
+  id: string;
+  timestamp: string;
+  author: string;
+  driver: string;
+  description: string;
+  scope: any;
+  vcm_before_usd: string;
+  vcm_after_usd: string;
+  impact_usd: string;
+  impact_pct: string;
+}
+
 export interface BridgeResult {
   summary: BridgeSummary;
+  by_product_line?: ProductLineBridge[];
   by_material: any[];
   by_month: any[];
   raw_preview: any[];

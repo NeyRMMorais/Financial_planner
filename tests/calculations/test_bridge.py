@@ -260,7 +260,7 @@ def test_generate_bridge_commentary_deterministic(monkeypatch) -> None:
     assert bullets[0] == "[Deterministic Summary]"
     # check that the text contains the values
     assert "$1.90M" in bullets[1] # Delta: 4.4M - 2.5M = 1.9M
-    assert "Price Effect" in bullets[2] # rank 1
+    assert "Price Realization" in bullets[2] # rank 1
 
 
 def test_generate_bridge_commentary_ai(monkeypatch) -> None:
@@ -309,3 +309,96 @@ def test_generate_bridge_commentary_ai(monkeypatch) -> None:
     assert len(bullets) > 0
     assert bullets[0] == "[AI-Generated Summary]"
     assert "AI summary bullet 1" in bullets[1]
+
+
+def test_bridge_pure_volume_vs_mix_effect(mock_fx_rates) -> None:
+    """Test mathematical separation of Pure Volume Effect and Mix Effect."""
+    # Scenario A:
+    # M-1 (Specialties, Line 1): 100 MT @ Unit VCM LC 200 (Rate 2.0 -> $100/MT) = $10,000
+    # M-2 (Intermediates, Line 3): 100 MT @ Unit VCM LC 40 (Rate 2.0 -> $20/MT) = $2,000
+    # Total Volume A = 200 MT, Total VCM A = $12,000, Weighted Avg Margin A = $60.00 / MT
+    df_a = pd.DataFrame([
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-1001",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Resin A",
+            "Volume": Decimal("100.000"), "Price_LC": Decimal("300.00"),
+            "Unit_VCM_LC": Decimal("200.00"), "VCM_USD": Decimal("10000.00"),
+        },
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-5185",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Base Polymer E",
+            "Volume": Decimal("100.000"), "Price_LC": Decimal("100.00"),
+            "Unit_VCM_LC": Decimal("40.00"), "VCM_USD": Decimal("2000.00"),
+        }
+    ])
+
+    # Case 1: Pure Volume Growth without Mix shift (+50% volume on both products)
+    df_b_pure_vol = pd.DataFrame([
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-1001",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Resin A",
+            "Volume": Decimal("150.000"), "Price_LC": Decimal("300.00"),
+            "Unit_VCM_LC": Decimal("200.00"), "VCM_USD": Decimal("15000.00"),
+        },
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-5185",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Base Polymer E",
+            "Volume": Decimal("150.000"), "Price_LC": Decimal("100.00"),
+            "Unit_VCM_LC": Decimal("40.00"), "VCM_USD": Decimal("3000.00"),
+        }
+    ])
+
+    res_1 = calculate_margin_bridge(df_a, df_b_pure_vol, mock_fx_rates, mock_fx_rates)
+    summary_1 = summarize_margin_bridge(res_1)
+
+    assert summary_1["vcm_usd_a"] == Decimal("12000.00")
+    assert summary_1["vcm_usd_b"] == Decimal("18000.00")
+    # Total volume grows by 100 MT * $60/MT = $6,000.00 Pure Volume
+    assert summary_1["pure_volume_effect"] == Decimal("6000.00")
+    # Exact zero mix effect because proportions remained identical (50% / 50%)
+    assert summary_1["mix_effect"] == Decimal("0.00")
+    assert summary_1["price_effect"] == Decimal("0.00")
+    assert summary_1["cost_effect"] == Decimal("0.00")
+    assert summary_1["fx_effect"] == Decimal("0.00")
+    # 6-pillar reconciliation
+    assert summary_1["vcm_usd_a"] + summary_1["pure_volume_effect"] + summary_1["mix_effect"] + summary_1["price_effect"] + summary_1["cost_effect"] + summary_1["fx_effect"] == summary_1["vcm_usd_b"]
+
+    # Case 2: Pure Mix Shift (Total Volume stays 200 MT, but MAT-1001 increases by 50 MT while MAT-5185 drops by 50 MT)
+    df_b_mix_shift = pd.DataFrame([
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-1001",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Resin A",
+            "Volume": Decimal("150.000"), "Price_LC": Decimal("300.00"),
+            "Unit_VCM_LC": Decimal("200.00"), "VCM_USD": Decimal("15000.00"),
+        },
+        {
+            "Sold to ID": "C-1", "Ship to ID": "S-1", "Material ID": "MAT-5185",
+            "Date": "2026-01", "Plant": "P-1", "Plant_Currency": "EUR", "Material": "Base Polymer E",
+            "Volume": Decimal("50.000"), "Price_LC": Decimal("100.00"),
+            "Unit_VCM_LC": Decimal("40.00"), "VCM_USD": Decimal("1000.00"),
+        }
+    ])
+
+    res_2 = calculate_margin_bridge(df_a, df_b_mix_shift, mock_fx_rates, mock_fx_rates)
+    summary_2 = summarize_margin_bridge(res_2)
+
+    assert summary_2["vcm_usd_a"] == Decimal("12000.00")
+    assert summary_2["vcm_usd_b"] == Decimal("16000.00")
+    # Total volume delta is 0 -> Pure Volume Effect must be $0.00
+    assert summary_2["pure_volume_effect"] == Decimal("0.00")
+    # Mix effect captures the full +$4,000.00 favorable shift towards high-margin MAT-1001!
+    assert summary_2["mix_effect"] == Decimal("4000.00")
+    assert summary_2["vcm_usd_a"] + summary_2["pure_volume_effect"] + summary_2["mix_effect"] + summary_2["price_effect"] + summary_2["cost_effect"] + summary_2["fx_effect"] == summary_2["vcm_usd_b"]
+
+    # Product Line breakdown check
+    from src.financial_planner.calculations.bridge import summarize_by_product_line
+    lines = summarize_by_product_line(res_2)
+    assert len(lines) == 2
+    line_1 = next(l for l in lines if "Line 1" in l["product_line"])
+    line_3 = next(l for l in lines if "Line 3" in l["product_line"])
+
+    assert line_1["volume_delta"] == Decimal("50.000")
+    assert line_1["vcm_delta_usd"] == Decimal("5000.00")
+    assert line_3["volume_delta"] == Decimal("-50.000")
+    assert line_3["vcm_delta_usd"] == Decimal("-1000.00")
+
