@@ -203,6 +203,8 @@ interface AppState {
     scenario_a: string;
     scenario_b: string;
     vcm_usd_a: number;
+    pure_volume_effect?: number;
+    mix_effect?: number;
     volume_effect: number;
     price_effect: number;
     cost_effect: number;
